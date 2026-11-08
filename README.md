@@ -138,6 +138,10 @@ npm start -- --help
 - Bot, sunucunun gönderdiği blok verisini okuyor. Yani cevherleri "duvarın arkasından" görüyor. Bu, kendi dünyanda eğlence ve deneme içindir. **Botla yapılan koşular speedrun.com gibi yerlere gönderilemez.** Başkasının sunucusunda kullanmak da hile sayılır ve ban sebebidir.
 - 30 saniyelik videolardaki gibi bir süre bu botla beklenmemeli. O videolar genelde set seed, glitch ve TAS kombinasyonu.
 
+## Seed avcısı (Faz 1)
+
+Birden fazla bilgisayarda speedrun'a uygun seed arayan program `seed-avcisi/` klasöründe. Windows 7–11 ve Linux'ta çalışır. Ayrıntılar için: [seed-avcisi/README.md](seed-avcisi/README.md)
+
 ## Test
 
 ```bash
