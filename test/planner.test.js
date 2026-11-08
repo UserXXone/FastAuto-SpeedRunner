@@ -43,3 +43,15 @@ test('makePlan: elmas yoksa açıklama verir', () => {
   assert.deepStrictEqual(plan.diamonds, [])
   assert.match(plan.reason, /elmas/)
 })
+
+test('makePlan: su içindeki demir yerine kuru olanı seçer', () => {
+  const resources = {
+    log: tree(0, 0),
+    iron: [{ x: 5, y: 40, z: 0, wet: true }, { x: 6, y: 40, z: 0, wet: true }, { x: 7, y: 40, z: 0, wet: true },
+      { x: 0, y: 40, z: 25 }, { x: 1, y: 40, z: 25 }, { x: 2, y: 40, z: 25 }],
+    diamond: [{ x: 3, y: -58, z: 10 }],
+    lava: []
+  }
+  const plan = makePlan(resources, { x: 0, y: 64, z: 0 })
+  assert.ok(plan.iron.every((p) => p.z === 25))
+})

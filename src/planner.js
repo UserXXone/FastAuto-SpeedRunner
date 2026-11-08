@@ -83,6 +83,11 @@ function ironSetFrom(seedVein, allIron) {
   return set.length >= IRON_NEEDED ? set : null;
 }
 
+// Su içindeki/yanındaki cevherler: yol bulucu zorlanıyor, boğulma riski var.
+const WET_PENALTY = 60;
+const wetPenalty = (group) =>
+  group.some((p) => p.wet) ? WET_PENALTY : 0;
+
 function lavaPenalty(target, lava) {
   let pen = 0;
   for (const l of lava) {
@@ -125,7 +130,12 @@ function makePlan(resources, start, opts = {}) {
     for (const set of ironSets) {
       const ic = center(set);
       const total =
-        cost(start, treeEnd) + cost(treeEnd, ic) + cost(ic, dc) + dCost;
+        cost(start, treeEnd) +
+        cost(treeEnd, ic) +
+        cost(ic, dc) +
+        dCost +
+        wetPenalty(set) +
+        wetPenalty(vein);
       if (!best || total < best.estimatedCost) {
         best = { trees, iron: set, diamonds: vein, estimatedCost: total };
       }

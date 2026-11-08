@@ -39,8 +39,8 @@ function setupMovements(bot) {
   for (const n of ["diamond_ore", "deepslate_diamond_ore"]) {
     m.blocksCantBreak.add(bot.registry.blocksByName[n].id);
   }
-  // Su altından geçmek boğulmaya yol açıyor: suyu mümkünse dolaş.
-  m.liquidCost = 25;
+  // Suyu biraz pahalı say ama çok değil: aşırı pahalıysa yol arama zaman aşımına düşüyor.
+  m.liquidCost = 4;
   bot.pathfinder.setMovements(m);
   bot.pathfinder.thinkTimeout = 8000;
   bot.pathfinder.tickTimeout = 60; // tick başına daha çok düşün = daha hızlı rota
@@ -265,11 +265,13 @@ async function findDiamondsLive(bot, target, say) {
     if (enough()) return;
     // Görünürde elmas yok: derine in ve yeni chunk'lar yüklemek için ilerle.
     say("Görünürde elmas yok, keşfe çıkıyorum...");
-    if (bot.entity.position.y > DIAMOND_Y + 4)
-      await A.goto(bot, new GoalY(DIAMOND_Y));
+    if (bot.entity.position.y > DIAMOND_Y + 4) {
+      if (!(await A.digDown(bot, DIAMOND_Y)))
+        await A.goto(bot, new GoalY(DIAMOND_Y), 90000);
+    }
     const [dx, dz] = dirs[step % dirs.length];
     const p = bot.entity.position;
-    await A.goto(bot, new GoalXZ(p.x + dx * 48, p.z + dz * 48));
+    await A.goto(bot, new GoalXZ(p.x + dx * 48, p.z + dz * 48), 90000);
     await waitForChunks(bot, 800, 6000);
   }
 }

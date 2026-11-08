@@ -55,6 +55,7 @@ function scanLoaded(bot, center, maxDistance, limits = LIMITS) {
         z: p.z,
         name: b ? b.name : names[0],
         exposed: isExposed(bot, p),
+        wet: cat === "log" || cat === "lava" ? false : isWet(bot, p),
       };
     });
   }
@@ -75,6 +76,17 @@ function isExposed(bot, p) {
     const b = bot.blockAt(p.offset(dx, dy, dz));
     if (b && (b.name === "air" || b.name === "cave_air")) return true;
   }
+  return false;
+}
+
+// Cevherin 2 blok çevresinde su varsa (yeraltı gölü/aquifer) ulaşmak zor ve tehlikeli.
+function isWet(bot, p) {
+  for (let dx = -2; dx <= 2; dx++)
+    for (let dy = -1; dy <= 2; dy++)
+      for (let dz = -2; dz <= 2; dz++) {
+        const b = bot.blockAt(p.offset(dx, dy, dz));
+        if (b && b.name === "water") return true;
+      }
   return false;
 }
 

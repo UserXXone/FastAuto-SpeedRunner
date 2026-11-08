@@ -4,7 +4,7 @@
 
 const { Vec3 } = require("vec3");
 const {
-  goals: { GoalGetToBlock, GoalNear },
+  goals: { GoalGetToBlock, GoalNear, GoalNearXZ, GoalY, GoalBlock },
 } = require("mineflayer-pathfinder");
 
 const dbg = (...a) => {
@@ -40,7 +40,7 @@ function eyeDistance(bot, pos) {
 }
 
 // Yol bulucuyla git. Takılıp kalmasın diye süre sınırı var.
-async function goto(bot, goal, timeoutMs = 45000) {
+async function goto(bot, goal, timeoutMs = 30000) {
   let timer;
   const timeout = new Promise((_, reject) => {
     timer = setTimeout(() => reject(new Error("zaman aşımı")), timeoutMs);
@@ -99,6 +99,79 @@ async function collectDrops(bot, near, radius = 4) {
   }
 }
 
+const isLiquid = (b) => b && (b.name === "lava" || b.name === "water");
+
+// Düz aşağı kaz (speedrunner usulü). Lav/su yanındaysa ya da altında derin
+// boşluk varsa güvenli değil: durur ve false döner.
+async function digDown(bot, targetY) {
+  const p0 = bot.entity.position.floored();
+  await goto(bot, new GoalBlock(p0.x, p0.y, p0.z), 5000); // bloğun ortasına geç
+  let stuck = 0;
+  while (bot.entity.position.y > targetY + 0.5) {
+    const feet = bot.entity.position.floored();
+    const below = bot.blockAt(feet.offset(0, -1, 0));
+    if (!below) return false;
+    // Kazacağımız bloğun etrafı ve altı güvenli mi?
+    const around = [
+      [0, -2, 0], [1, -1, 0], [-1, -1, 0], [0, -1, 1], [0, -1, -1],
+    ].map(([x, y, z]) => bot.blockAt(feet.offset(x, y, z)));
+    if (isLiquid(below) || around.some(isLiquid)) {
+      dbg("aşağıda sıvı var, düz inişi bırakıyorum");
+      return false;
+    }
+    if (!bot.entity.onGround) {
+      await sleep(50);
+      continue;
+    }
+    if (below.boundingBox === "empty") {
+      // Boşluk: ne kadar düşeceğiz?
+      let depth = 1;
+      while (depth < 6 && bot.blockAt(feet.offset(0, -1 - depth, 0))?.boundingBox === "empty") depth++;
+      if (depth > 3) {
+        dbg("altında derin boşluk, düz inişi bırakıyorum");
+        return false;
+      }
+      await sleep(250);
+      if (++stuck > 12) return false;
+      continue;
+    }
+    await equipFor(bot, below);
+    const held = bot.heldItem ? bot.heldItem.type : null;
+    if (!below.canHarvest(held) || below.hardness == null || below.hardness < 0) return false;
+    const y0 = bot.entity.position.y;
+    try {
+      await bot.dig(below, true);
+    } catch (err) {
+      return false;
+    }
+    const t0 = Date.now();
+    // Havadayken kazmak 5 kat yavaş: yere basana kadar bekle.
+    while (
+      (bot.entity.position.y >= y0 - 0.5 || !bot.entity.onGround) &&
+      Date.now() - t0 < 1500
+    )
+      await sleep(25);
+    if (bot.entity.position.y >= y0 - 0.5 && ++stuck > 12) return false;
+  }
+  return true;
+}
+
+// Derindeki/uzaktaki bir bloğa tek seferde yol hesaplamak çok yavaş.
+// Önce hedefin yanındaki sütuna yürü, düz aşağı kaz, sonra yanına geç.
+async function approach(bot, pos) {
+  const me = bot.entity.position;
+  const dy = me.y - pos.y;
+  const flat = Math.hypot(me.x - pos.x, me.z - pos.z);
+  if (dy > 6) {
+    if (flat > 2) await goto(bot, new GoalNearXZ(pos.x + 0.5, pos.z + 0.5, 1.5), 40000);
+    const ok = await digDown(bot, pos.y);
+    if (!ok) await goto(bot, new GoalY(pos.y + 1), 60000);
+  } else if (flat > 24) {
+    await goto(bot, new GoalNear(pos.x, pos.y, pos.z, 6), 40000);
+  }
+  return goto(bot, new GoalGetToBlock(pos.x, pos.y, pos.z), 30000);
+}
+
 // Bir bloğa git, en iyi aletle kaz, drop'u topla.
 async function mineBlock(bot, pos, { expect, collect = true } = {}) {
   pos = new Vec3(pos.x, pos.y, pos.z);
@@ -108,8 +181,8 @@ async function mineBlock(bot, pos, { expect, collect = true } = {}) {
 
   if (eyeDistance(bot, pos) > 4.3) {
     const ok =
-      (await goto(bot, new GoalGetToBlock(pos.x, pos.y, pos.z))) ||
-      (await goto(bot, new GoalNear(pos.x, pos.y, pos.z, 2)));
+      (await approach(bot, pos)) ||
+      (await goto(bot, new GoalNear(pos.x, pos.y, pos.z, 2), 20000));
     if (!ok) {
       dbg("ulaşılamadı:", block.name, pos.toString());
       return false;
@@ -358,6 +431,7 @@ async function smelt(bot, inputName, amount, fuelTest, fuelAmount) {
 
 module.exports = {
   sleep,
+  digDown,
   count,
   isLog,
   isPlanks,
