@@ -55,11 +55,18 @@ npm start
 Bot oyuna "Speedrunner" adıyla girer ve koşuya başlar. Konsolda şöyle split'ler görürsün:
 
 ```
-⏱  6.5s  (+6.5s)  Harita + strateji
-⏱  31.0s  (+24.5s)  Odun (6 kütük)
-...
-💎 Elmas bulundu! Süre: 4:12.4
+  Aşama                         Süre    Toplam
+  Harita + strateji                 2.3s      2.3s
+  Odun (6 kütük)                   34.9s     37.2s
+  Tahta kazma                       3.7s     41.0s
+  Taş kazma                        43.0s    1:23.9
+  Demir (3 ham demir)             2:25.9    3:49.9
+  Fırın + eritme                   32.0s    4:21.8
+  Demir kazma                       0.4s    4:22.2
+  ELMAS x2                        1:01.6    5:23.8
 ```
+
+(Gerçek bir test koşusu, 26.1 sunucusunda. Testlerde sıfırdan elmasa genelde **5–8 dakika** sürüyor. Süreyi en çok etkileyen şey, demir ve elmasın ne kadar derinde olduğu.)
 
 Koşudan sonra `harita/son-kosu.html` dosyasını tarayıcıda açarsan botun gördüğü haritayı ve seçtiği rotayı görürsün.
 
@@ -112,6 +119,7 @@ npm start -- --help
 | `--diamonds <n>` | Kaç elmas toplasın (varsayılan 1) |
 | `--radius <blok>` | Canlı taramanın yarıçapı |
 | `--chat` | Aşamaları oyun içi chate de yazsın |
+| `--bekle <sn>` | Bağlandıktan sonra bu kadar bekleyip başlasın (oyuna girip izlemek için) |
 
 ## Nasıl çalışıyor?
 
@@ -124,7 +132,9 @@ npm start -- --help
 ## Bilinen sınırlar
 
 - **Dövüş yok:** Peaceful veya Easy öner.
-- Su altında havası azalırsa yüzeye çıkmaya çalışıyor, ama dar su mağaralarında yine boğulabilir.
+- Su altında havası azalırsa yüzeye çıkmaya çalışıyor, ama dar su mağaralarında yine boğulabilir. Planlayıcı, su içindeki cevherleri zaten tercih etmiyor.
+- Derine inerken düz aşağı kazıyor. Altında veya yanında lav/su, ya da 3 bloktan derin bir boşluk görürse durup yol bulucuya geçiyor.
+- Sorun ayıklamak için: `DEBUG=1 npm start` her adımı ayrıntılı yazar.
 - Bot, sunucunun gönderdiği blok verisini okuyor. Yani cevherleri "duvarın arkasından" görüyor. Bu, kendi dünyanda eğlence ve deneme içindir. **Botla yapılan koşular speedrun.com gibi yerlere gönderilemez.** Başkasının sunucusunda kullanmak da hile sayılır ve ban sebebidir.
 - 30 saniyelik videolardaki gibi bir süre bu botla beklenmemeli. O videolar genelde set seed, glitch ve TAS kombinasyonu.
 

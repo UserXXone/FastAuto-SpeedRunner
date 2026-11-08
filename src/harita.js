@@ -225,6 +225,22 @@ async function makeSeedMap(opts) {
       resources[k] = resources[k].filter(inside);
 
     const plan = makePlan(resources, spawn, { logsNeeded: 6 });
+    // Dosya şişmesin: haritada gösterilecek kısmı doğma noktasına en yakınlarla sınırla.
+    const near = (list, n) =>
+      list
+        .slice()
+        .sort(
+          (a, b) =>
+            Math.hypot(a.x - spawn.x, a.z - spawn.z) -
+            Math.hypot(b.x - spawn.x, b.z - spawn.z),
+        )
+        .slice(0, n);
+    resources = {
+      log: near(resources.log, 1500),
+      iron: near(resources.iron, 2500),
+      diamond: near(resources.diamond, 2500),
+      lava: near(resources.lava, 2000),
+    };
     fs.mkdirSync(OUT, { recursive: true });
     const base = path.join(OUT, `seed-${seed.replace(/[^\w-]/g, "_")}`);
     const result = {
