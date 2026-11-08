@@ -44,12 +44,23 @@ Sonuç dosyası: `seedler-pc1.txt` (numara bilgisayara göre değişir).
 ```bash
 cd seed-avcisi
 make                      # bin/seed-avcisi oluşur
-tmux new -s avci
-./bin/seed-avcisi --pc 6 --toplam 6 --cekirdek 4
-# Ctrl+b, sonra d: tmux'tan ayrıl, tarama sürer
+./bin/seed-avcisi --pc 6 --toplam 6 --cekirdek 4     # canlı panelle, elle
 ```
 
-VDS sağlayıcın sürekli %100 CPU kullanımını sevmiyorsa `--cekirdek` ile kaç çekirdek kullanılacağını sınırla.
+### Servis olarak (önerilen)
+
+Servis olarak kurulursa sunucu yeniden başladığında tarama kendiliğinden devam eder. İlerleme web panelinde (seed.zeax.dev) görünür.
+
+```bash
+cp seed-avcisi/seed-avci.service /etc/systemd/system/
+systemctl daemon-reload && systemctl enable --now seed-avci
+
+systemctl status seed-avci      # durum
+systemctl stop seed-avci        # durdur (sonuçları kaydedip kapanır)
+journalctl -u seed-avci -f      # kayıtlar
+```
+
+VDS sağlayıcın sürekli %100 CPU kullanımını sevmiyorsa `--cekirdek` ile sınırla. Servis en düşük öncelikte çalışır.
 
 ## Sonuç dosyası
 
@@ -84,6 +95,7 @@ Dosyaları birleştirmek için hepsini aynı klasöre koy. Faz 2'deki panel heps
 --ust U           Her yapı düzeni için denenecek varyasyon (varsayılan: 4096)
 --normal-oncelik  Düşük öncelik yerine tam hız
 --sade           Canlı panel yerine tek satır ilerleme
+--sessiz         İlerleme yazma (servis için)
 ```
 
 ## Derleme (geliştirici için)

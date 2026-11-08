@@ -91,6 +91,7 @@ static double g_oncekiSure = 0;           /* önceki oturumların toplam süresi
 static double g_buOturum = 0;
 static int g_ansi = 0;                    /* canlı panel destekleniyor mu */
 static int g_sade = 0;
+static int g_sessiz = 0;                  /* servis modu: ilerleme yazma */
 
 static Aday *g_top;      /* en iyiler, sn'ye göre artan */
 static int g_topN = 0;
@@ -555,7 +556,8 @@ static void yardim(void)
         "  --kale B        Kalenin merkeze uzakligi en fazla B blok (varsayilan: 1700)\n"
         "  --ust U         Her yapi tohumu icin denenecek ust-16 cesidi (varsayilan: 4096, en fazla 65536)\n"
         "  --normal-oncelik Bilgisayari yavaslatma pahasina tam hiz\n"
-        "  --sade          Canli panel yerine tek satir ilerleme\n\n"
+        "  --sade          Canli panel yerine tek satir ilerleme\n"
+        "  --sessiz        Ilerleme yazma (servis olarak calistirmak icin)\n\n"
         "Ctrl+C ile durdurabilirsin; tekrar calistirinca kaldigi yerden devam eder.\n");
 }
 
@@ -582,6 +584,7 @@ int main(int argc, char **argv)
         else if (!strcmp(k, "--cikti") && v) { snprintf(A.cikti, sizeof A.cikti, "%s", v); i++; }
         else if (!strcmp(k, "--normal-oncelik")) A.dusukOncelik = 0;
         else if (!strcmp(k, "--sade")) g_sade = 1;
+        else if (!strcmp(k, "--sessiz")) g_sessiz = 1;
         else { fprintf(stderr, "Bilinmeyen secenek: %s\n\n", k); yardim(); return 1; }
 #undef SAYI
     }
@@ -614,7 +617,7 @@ int main(int argc, char **argv)
 #ifndef _WIN32
     g_ansi = isatty(1);
 #endif
-    if (g_sade) g_ansi = 0;
+    if (g_sade || g_sessiz) g_ansi = 0;
     signal(SIGINT, durdur);
     signal(SIGTERM, durdur);
     for (int t = 0; t < MAX_THREAD; t++) g_aktifBlok[t] = UINT64_MAX;
@@ -644,7 +647,7 @@ int main(int argc, char **argv)
         double hiz = gecen > 0 ? s48 / gecen : 0;
         if (g_ansi) {
             paneliCiz(gecen, hiz);
-        } else {
+        } else if (!g_sessiz) {
             double enIyi = g_topN ? g_top[0].sn : 0;
             printf("\r%6.0fs | %.0f yapi duzeni/sn | aday %" PRIu64 " | uygun seed %" PRIu64 " | en iyi %.1f sn   ",
                    gecen, hiz, gecA, bul, enIyi);

@@ -1,0 +1,17 @@
+[Unit]
+Description=FastAuto seed avcisi (VDS = pc 6/6, 4 cekirdek)
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/root/FastAuto-SpeedRunner/seed-avcisi
+ExecStart=/root/FastAuto-SpeedRunner/seed-avcisi/bin/seed-avcisi --pc 6 --toplam 6 --cekirdek 4 --sessiz
+# Durdururken SIGTERM gelir; program sonuçları kaydedip kapanır.
+KillSignal=SIGTERM
+TimeoutStopSec=60
+Restart=always
+RestartSec=10
+Nice=10
+
+[Install]
+WantedBy=multi-user.target
