@@ -24,7 +24,7 @@ Ağaç kesme, blaze kesme ve ejderha dövüşü gibi görevler her seed'de aşa�
    - **Toplam kaç bilgisayar tarıyor:** Hepsinde **aynı** sayıyı yaz.
 
    Cevaplar `ayar.txt`'ye kaydedilir, bir daha sormaz.
-4. Pencere açık kaldıkça tarar. Ekranda canlı olarak hız, bulunan seed sayısı ve en iyi süre görünür.
+4. Pencere açık kaldıkça tarar. Ekranda canlı bir panel görünür: geçen süre, hız, taranan ve kalan miktar, yüzde, son denenen seed ve **en iyi 15 seed** sıralı olarak. Windows 7/8'de panel yerine tek satırlık bir ilerleme gösterilir.
 5. Durdurmak için **Ctrl+C**. Tekrar çalıştırınca **kaldığı yerden devam eder**. Sonuçlar her 30 saniyede bir kaydedilir.
 
 Sonuç dosyası: `seedler-pc1.txt` (numara bilgisayara göre değişir).
@@ -83,6 +83,7 @@ Dosyaları birleştirmek için hepsini aynı klasöre koy. Faz 2'deki panel heps
 --kale B          Kalenin merkeze uzaklığı en fazla B blok (varsayılan: 1700)
 --ust U           Her yapı düzeni için denenecek varyasyon (varsayılan: 4096)
 --normal-oncelik  Düşük öncelik yerine tam hız
+--sade           Canlı panel yerine tek satır ilerleme
 ```
 
 ## Derleme (geliştirici için)

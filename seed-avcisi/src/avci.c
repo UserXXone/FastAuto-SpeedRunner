@@ -86,6 +86,11 @@ static uint64_t g_saySay48[MAX_THREAD];  /* taranan 48-bit */
 static uint64_t g_sayGecA[MAX_THREAD];   /* A'yı geçen */
 static uint64_t g_saySeed[MAX_THREAD];   /* B'de denenen tam seed */
 static uint64_t g_sayBulunan[MAX_THREAD];
+static volatile uint64_t g_sonSeed = 0;  /* panelde gösterilecek son denenen seed */
+static double g_oncekiSure = 0;           /* önceki oturumların toplam süresi (sn) */
+static double g_buOturum = 0;
+static int g_ansi = 0;                    /* canlı panel destekleniyor mu */
+static int g_sade = 0;
 
 static Aday *g_top;      /* en iyiler, sn'ye göre artan */
 static int g_topN = 0;
@@ -210,6 +215,7 @@ static void asamaB(uint64_t s48, const AdayA *a, Generator *gO, Generator *gN, i
         uint64_t ust = ((uint64_t)k * 40503u + (s48 & 0xffff)) & 0xffff;
         uint64_t seed = (ust << 48) | s48;
         g_saySeed[t]++;
+        if (t == 0 && (k & 255) == 0) g_sonSeed = seed;
 
         /* Nether biyomları: bastion bazalt deltada çıkmaz. */
         applySeed(gN, DIM_NETHER, seed);
@@ -352,7 +358,7 @@ static void kaydet(int bitti)
 
     FILE *d = fopen(A.durum, "w");
     if (d) {
-        fprintf(d, "%d %d %" PRIu64 "\n", A.pc, A.toplam, devam);
+        fprintf(d, "%d %d %" PRIu64 " %.0f\n", A.pc, A.toplam, devam, g_oncekiSure + g_buOturum);
         fclose(d);
     }
 }
@@ -363,12 +369,15 @@ static void oncekiniYukle(void)
     if (d) {
         int pc, toplam;
         uint64_t blok;
-        if (fscanf(d, "%d %d %" SCNu64, &pc, &toplam, &blok) == 3) {
+        double sure = 0;
+        int n = fscanf(d, "%d %d %" SCNu64 " %lf", &pc, &toplam, &blok, &sure);
+        if (n >= 3) {
             if (pc != A.pc || toplam != A.toplam) {
                 fprintf(stderr, "Uyarı: %s başka bir ayarla (pc %d/%d) kaydedilmiş. Baştan başlıyorum.\n",
                         A.durum, pc, toplam);
             } else {
                 g_siradakiBlok = g_baslangicBlok = blok;
+                if (n == 4) g_oncekiSure = sure;
                 printf("Kaldığı yerden devam: blok %" PRIu64 "\n", blok);
             }
         }
@@ -394,6 +403,91 @@ static void oncekiniYukle(void)
 }
 
 /* --------------------------- ana program --------------------------------- */
+
+/* --------------------------- canlı panel --------------------------------- */
+
+static void binlik(char *out, size_t n, uint64_t v)
+{
+    char tmp[32];
+    snprintf(tmp, sizeof tmp, "%" PRIu64, v);
+    int len = (int)strlen(tmp), o = 0;
+    for (int i = 0; i < len && o < (int)n - 2; i++) {
+        if (i && (len - i) % 3 == 0) out[o++] = '.';
+        out[o++] = tmp[i];
+    }
+    out[o] = 0;
+}
+
+static void sureYaz(char *out, size_t n, double sn)
+{
+    uint64_t s = (uint64_t)sn;
+    unsigned gun = (unsigned)(s / 86400), sa = (unsigned)(s % 86400 / 3600);
+    unsigned dk = (unsigned)(s % 3600 / 60), sec = (unsigned)(s % 60);
+    if (gun) snprintf(out, n, "%u gun %02u:%02u:%02u", gun, sa, dk, sec);
+    else snprintf(out, n, "%02u:%02u:%02u", sa, dk, sec);
+}
+
+static void kalanYaz(char *out, size_t n, double sn)
+{
+    double yil = sn / (365.25 * 86400);
+    if (yil >= 1e9) snprintf(out, n, "~%.1f milyar yil", yil / 1e9);
+    else if (yil >= 1e6) snprintf(out, n, "~%.1f milyon yil", yil / 1e6);
+    else if (yil >= 1) snprintf(out, n, "~%.0f yil", yil);
+    else { sureYaz(out, n, sn); }
+}
+
+#define SATIR "\033[K\n"
+
+static void paneliCiz(double gecen, double hiz)
+{
+    uint64_t dilim = ((1ULL << 48) + (uint64_t)A.toplam - 1) / (uint64_t)A.toplam;
+    uint64_t taranan = __atomic_load_n(&g_siradakiBlok, __ATOMIC_SEQ_CST) * BLOK;
+    if (taranan > dilim) taranan = dilim;
+    uint64_t kalan = dilim - taranan;
+    uint64_t gecA = 0, seed = 0, bul = 0;
+    for (int t = 0; t < A.threads; t++) { gecA += g_sayGecA[t]; seed += g_saySeed[t]; bul += g_sayBulunan[t]; }
+
+    char b1[40], b2[40], b3[40], b4[40], b5[40], s1[40], s2[40], k1[40];
+    binlik(b1, sizeof b1, taranan);
+    binlik(b2, sizeof b2, kalan);
+    binlik(b3, sizeof b3, seed);
+    binlik(b4, sizeof b4, bul);
+    binlik(b5, sizeof b5, gecA);
+    sureYaz(s1, sizeof s1, gecen);
+    sureYaz(s2, sizeof s2, g_oncekiSure + gecen);
+    kalanYaz(k1, sizeof k1, hiz > 0 ? kalan / hiz : 0);
+    double yuzde = 100.0 * (double)taranan / (double)dilim;
+
+    printf("\033[H");
+    printf("================ FastAuto Seed Avcisi - Minecraft %s ================" SATIR, SURUM);
+    printf(SATIR);
+    printf("  Bilgisayar     : %d / %d   (%d cekirdek)" SATIR, A.pc, A.toplam, A.threads);
+    printf("  Sure           : bu oturum %s  |  toplam %s" SATIR, s1, s2);
+    printf("  Hiz            : %.0f yapi duzeni/sn" SATIR, hiz);
+    printf("  Taranan        : %s yapi duzeni" SATIR, b1);
+    printf("  Yuzde          : %%%.10f  (bu bilgisayarin dilimi)" SATIR, yuzde);
+    printf("  Kalan          : %s yapi duzeni  (%s)" SATIR, b2, k1);
+    printf("  Son denenen    : %" PRId64 SATIR, (int64_t)g_sonSeed);
+    printf("  Bu oturumda    : %s seed denendi, %s aday duzen, %s uygun seed" SATIR, b3, b5, b4);
+    printf("  Sonuc dosyasi  : %s  (30 sn'de bir kaydedilir)" SATIR, A.cikti);
+    printf(SATIR);
+    printf("  EN IYI SEED'LER  (sn = tahmini yol suresi, dusuk = iyi)" SATIR);
+    printf("  ---------------------------------------------------------------------------" SATIR);
+    printf("   #  %-21s %6s  %-18s %7s %7s  %s" SATIR, "seed", "sn", "biyom", "portal", "nether", "kale");
+    LOCK();
+    int n = g_topN < 15 ? g_topN : 15;
+    for (int i = 0; i < n; i++) {
+        Aday *c = &g_top[i];
+        const char *ad = biome2str(MC, c->biyom);
+        printf("  %2d. %-21" PRId64 " %6.1f  %-18.18s %6.0fb %6db  %d,%d" SATIR, i + 1, (int64_t)c->seed, c->sn,
+               ad ? ad : "?", uzak(c->spx, c->spz, c->rpx, c->rpz), c->netherYol, c->shx, c->shz);
+    }
+    UNLOCK();
+    if (!n) printf("  (henuz bulunmadi, birkac dakika surebilir)" SATIR);
+    printf(SATIR "  Ctrl+C: durdur ve kaydet (tekrar calistirinca kaldigi yerden devam eder)" SATIR);
+    printf("\033[J");
+    fflush(stdout);
+}
 
 static void durdur(int sig) { (void)sig; g_dur = 1; }
 
@@ -424,7 +518,8 @@ static void yardim(void)
         "  --nether B      Nether merkezi -> bastion/fortress en fazla B blok (varsayilan: 120)\n"
         "  --kale B        Kalenin merkeze uzakligi en fazla B blok (varsayilan: 1700)\n"
         "  --ust U         Her yapi tohumu icin denenecek ust-16 cesidi (varsayilan: 4096, en fazla 65536)\n"
-        "  --normal-oncelik Bilgisayari yavaslatma pahasina tam hiz\n\n"
+        "  --normal-oncelik Bilgisayari yavaslatma pahasina tam hiz\n"
+        "  --sade          Canli panel yerine tek satir ilerleme\n\n"
         "Ctrl+C ile durdurabilirsin; tekrar calistirinca kaldigi yerden devam eder.\n");
 }
 
@@ -450,6 +545,7 @@ int main(int argc, char **argv)
         else if (!strcmp(k, "--dakika") && v) { A.dakika = atof(v); i++; }
         else if (!strcmp(k, "--cikti") && v) { snprintf(A.cikti, sizeof A.cikti, "%s", v); i++; }
         else if (!strcmp(k, "--normal-oncelik")) A.dusukOncelik = 0;
+        else if (!strcmp(k, "--sade")) g_sade = 1;
         else { fprintf(stderr, "Bilinmeyen secenek: %s\n\n", k); yardim(); return 1; }
 #undef SAYI
     }
@@ -470,10 +566,19 @@ int main(int argc, char **argv)
 #ifdef _WIN32
     InitializeCriticalSection(&g_lock);
     SetConsoleOutputCP(65001);
+    {   /* Windows 10+: renkli/canlı panel için VT modu. Windows 7/8'de olmaz, sade moda düşer. */
+        HANDLE h = GetStdHandle(STD_OUTPUT_HANDLE);
+        DWORD m;
+        if (GetConsoleMode(h, &m) && SetConsoleMode(h, m | 0x0004)) g_ansi = 1;
+    }
     if (A.dusukOncelik) SetPriorityClass(GetCurrentProcess(), BELOW_NORMAL_PRIORITY_CLASS);
 #else
     if (A.dusukOncelik && nice(10) == -1) { /* önemli değil */ }
 #endif
+#ifndef _WIN32
+    g_ansi = isatty(1);
+#endif
+    if (g_sade) g_ansi = 0;
     signal(SIGINT, durdur);
     signal(SIGTERM, durdur);
     for (int t = 0; t < MAX_THREAD; t++) g_aktifBlok[t] = UINT64_MAX;
@@ -492,19 +597,27 @@ int main(int argc, char **argv)
     }
 
     time_t bas = time(NULL), sonKayit = bas;
+    if (g_ansi) printf("\033[2J");
     while (!g_dur) {
         uyku_ms(1000);
         time_t simdi = time(NULL);
         double gecen = difftime(simdi, bas);
+        g_buOturum = gecen;
         uint64_t s48 = 0, gecA = 0, bul = 0;
         for (int t = 0; t < A.threads; t++) { s48 += g_saySay48[t]; gecA += g_sayGecA[t]; bul += g_sayBulunan[t]; }
-        double enIyi = g_topN ? g_top[0].sn : 0;
-        printf("\r%6.0fs | %.0f yapi tohumu/sn | aday %" PRIu64 " | uygun seed %" PRIu64 " | en iyi %.1f sn   ",
-               gecen, gecen > 0 ? s48 / gecen : 0, gecA, bul, enIyi);
-        fflush(stdout);
+        double hiz = gecen > 0 ? s48 / gecen : 0;
+        if (g_ansi) {
+            paneliCiz(gecen, hiz);
+        } else {
+            double enIyi = g_topN ? g_top[0].sn : 0;
+            printf("\r%6.0fs | %.0f yapi duzeni/sn | aday %" PRIu64 " | uygun seed %" PRIu64 " | en iyi %.1f sn   ",
+                   gecen, hiz, gecA, bul, enIyi);
+            fflush(stdout);
+        }
         if (difftime(simdi, sonKayit) >= 30) { kaydet(0); sonKayit = simdi; }
         if (A.dakika > 0 && gecen >= A.dakika * 60) g_dur = 1;
     }
+    if (g_ansi) printf("\033[2J\033[H");
     printf("\nDurduruluyor...\n");
     for (int t = 0; t < A.threads; t++) {
 #ifdef _WIN32
