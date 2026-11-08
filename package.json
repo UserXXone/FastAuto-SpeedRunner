@@ -1,0 +1,20 @@
+{
+  "name": "fastauto-speedrunner",
+  "version": "0.1.0",
+  "description": "Minecraft Java speedrun botu: sıfırdan başlayıp elmasa koşar, seed verilirse önce haritayı çıkarıp strateji kurar.",
+  "main": "src/index.js",
+  "bin": { "speedrunner": "src/index.js" },
+  "scripts": {
+    "start": "node src/index.js kos",
+    "harita": "node src/index.js harita",
+    "test": "node --test test/*.test.js"
+  },
+  "engines": { "node": ">=18" },
+  "license": "MIT",
+  "dependencies": {
+    "minecraft-data": "^3.119.0",
+    "mineflayer": "^4.39.0",
+    "mineflayer-pathfinder": "^2.4.5",
+    "vec3": "^0.1.10"
+  }
+}
