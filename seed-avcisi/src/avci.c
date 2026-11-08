@@ -489,6 +489,42 @@ static void paneliCiz(double gecen, double hiz)
     fflush(stdout);
 }
 
+/* Web paneli için istatistikleri JSON olarak yaz (5 sn'de bir). */
+static void jsonYaz(double gecen, double hiz)
+{
+    char yol[600], tmp[620];
+    snprintf(yol, sizeof yol, "%s.json", A.cikti);
+    snprintf(tmp, sizeof tmp, "%s.tmp", yol);
+    FILE *f = fopen(tmp, "w");
+    if (!f) return;
+    uint64_t dilim = ((1ULL << 48) + (uint64_t)A.toplam - 1) / (uint64_t)A.toplam;
+    uint64_t taranan = __atomic_load_n(&g_siradakiBlok, __ATOMIC_SEQ_CST) * BLOK;
+    if (taranan > dilim) taranan = dilim;
+    uint64_t gecA = 0, seed = 0, bul = 0;
+    for (int t = 0; t < A.threads; t++) { gecA += g_sayGecA[t]; seed += g_saySeed[t]; bul += g_sayBulunan[t]; }
+    fprintf(f, "{\"program\":\"%s\",\"minecraft\":\"%s\",\"pc\":%d,\"toplam\":%d,\"cekirdek\":%d,"
+               "\"guncellendi\":%lld,\"oturumSn\":%.0f,\"toplamSn\":%.0f,\"hiz\":%.1f,"
+               "\"taranan\":%" PRIu64 ",\"dilim\":%" PRIu64 ",\"sonSeed\":\"%" PRId64 "\","
+               "\"denenenSeed\":%" PRIu64 ",\"adayDuzen\":%" PRIu64 ",\"uygunSeed\":%" PRIu64 ",\"enIyiler\":[",
+            PROGRAM_SURUM, SURUM, A.pc, A.toplam, A.threads, (long long)time(NULL), gecen,
+            g_oncekiSure + gecen, hiz, taranan, dilim, (int64_t)g_sonSeed, seed, gecA, bul);
+    LOCK();
+    int n = g_topN < 100 ? g_topN : 100;
+    for (int i = 0; i < n; i++) {
+        Aday *c = &g_top[i];
+        const char *ad = biome2str(MC, c->biyom);
+        fprintf(f, "%s{\"seed\":\"%" PRId64 "\",\"sn\":%.1f,\"spawn\":[%d,%d],\"portal\":[%d,%d],"
+                   "\"bastion\":[%d,%d],\"fortress\":[%d,%d],\"kale\":[%d,%d],\"nether\":%d,\"biyom\":\"%s\"}",
+                i ? "," : "", (int64_t)c->seed, c->sn, c->spx, c->spz, c->rpx, c->rpz, c->bx, c->bz,
+                c->fx, c->fz, c->shx, c->shz, c->netherYol, ad ? ad : "?");
+    }
+    UNLOCK();
+    fprintf(f, "]}\n");
+    fclose(f);
+    remove(yol);
+    rename(tmp, yol);
+}
+
 static void durdur(int sig) { (void)sig; g_dur = 1; }
 
 static int cekirdekSayisi(void)
@@ -614,6 +650,7 @@ int main(int argc, char **argv)
                    gecen, hiz, gecA, bul, enIyi);
             fflush(stdout);
         }
+        if ((long long)gecen % 5 == 0) jsonYaz(gecen, hiz);
         if (difftime(simdi, sonKayit) >= 30) { kaydet(0); sonKayit = simdi; }
         if (A.dakika > 0 && gecen >= A.dakika * 60) g_dur = 1;
     }

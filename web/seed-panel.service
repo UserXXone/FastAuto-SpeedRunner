@@ -1,0 +1,13 @@
+[Unit]
+Description=FastAuto seed avcisi web paneli (seed.zeax.dev -> 127.0.0.1:8790)
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/root/FastAuto-SpeedRunner
+ExecStart=/usr/bin/node /root/FastAuto-SpeedRunner/web/sunucu.js
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target

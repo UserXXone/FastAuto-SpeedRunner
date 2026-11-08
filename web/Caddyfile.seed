@@ -1,0 +1,8 @@
+
+# FASTAUTO SEED AVCISI PANELI (ayri proje) -> 127.0.0.1:8790
+seed.zeax.dev {
+    request_body {
+        max_size 16KB
+    }
+    reverse_proxy 127.0.0.1:8790
+}
