@@ -41,7 +41,30 @@ function kart (etiket, deger) {
   return k
 }
 
+function kontrolCiz (servis) {
+  const b = $('#duraklat')
+  if (!b) return
+  const calisiyor = servis === 'active'
+  b.dataset.eylem = calisiyor ? 'duraklat' : 'surdur'
+  b.textContent = calisiyor ? '⏸ Taramayı duraklat' : (servis === 'inactive' ? '▶ Taramayı sürdür' : `▶ Başlat (${servis})`)
+  b.classList.toggle('duraklatildi', !calisiyor)
+  b.disabled = false
+}
+
+$('#duraklat') && $('#duraklat').addEventListener('click', async (e) => {
+  const b = e.currentTarget
+  const eylem = b.dataset.eylem
+  b.disabled = true
+  b.textContent = eylem === 'duraklat' ? 'Duraklatılıyor…' : 'Başlatılıyor…'
+  try {
+    const r = await fetch('/api/tarama', { method: 'POST', headers: { 'X-Panel': '1', 'Content-Type': 'application/json' }, body: JSON.stringify({ eylem }) })
+    if (r.ok) kontrolCiz((await r.json()).servis)
+    else { b.textContent = 'Hata, tekrar dene'; b.disabled = false }
+  } catch { b.textContent = 'Bağlantı yok'; b.disabled = false }
+})
+
 function ciz (d) {
+  kontrolCiz(d.servis)
   const aktif = d.pcler.filter((p) => p.cevrimici)
   const toplamHiz = aktif.reduce((s, p) => s + p.hiz, 0)
   const toplamTaranan = d.pcler.reduce((s, p) => s + p.taranan, 0)

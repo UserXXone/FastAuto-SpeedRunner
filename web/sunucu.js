@@ -11,6 +11,7 @@
 // Kod değişince tüm açık oturumlar kapanır.
 
 const http = require('http')
+const { execFile } = require('child_process')
 const fs = require('fs')
 const path = require('path')
 const crypto = require('crypto')
@@ -92,6 +93,22 @@ function hataKaydet (ip) {
   genelHata.push(simdi)
 }
 
+// ---------------------------------------------------------------- servis kontrolü
+
+const SERVIS = 'seed-avci'
+
+function servisDurumu () {
+  return new Promise((resolve) => {
+    execFile('systemctl', ['is-active', SERVIS], { timeout: 5000 }, (err, cikti) => resolve(String(cikti || '').trim() || 'bilinmiyor'))
+  })
+}
+
+function servisKomut (komut) {
+  return new Promise((resolve, reject) => {
+    execFile('systemctl', [komut, SERVIS], { timeout: 30000 }, (err) => (err ? reject(err) : resolve()))
+  })
+}
+
 // ---------------------------------------------------------------- veri
 
 function durumTopla () {
@@ -166,6 +183,8 @@ function panelSayfasi () {
 <a class="cikis" href="/cikis">Çıkış</a></header>
 <main>
   <section id="ozet" class="kartlar"></section>
+  <div class="kontrol"><button id="duraklat" type="button" disabled>…</button>
+  <span class="soluk" id="kontrolBilgi">Sadece bu sunucudaki (VDS) taramayı yönetir. Duraklatınca ilerleme kaydedilir, devam edince kaldığı yerden sürer.</span></div>
   <h2>Bilgisayarlar</h2>
   <section id="pcler" class="kartlar"></section>
   <h2>En iyi seed'ler <span class="soluk">(sn = tahmini yol süresi, düşük = iyi)</span></h2>
@@ -248,7 +267,29 @@ async function istek (req, res) {
 
   if (url.pathname === '/') return gonder(res, 200, 'text/html; charset=utf-8', panelSayfasi())
   if (url.pathname === '/uygulama.js') return gonder(res, 200, 'text/javascript; charset=utf-8', UYGULAMA)
-  if (url.pathname === '/api/durum') return gonder(res, 200, 'application/json; charset=utf-8', JSON.stringify(durumTopla()))
+  if (url.pathname === '/api/durum') {
+    const d = durumTopla()
+    d.servis = await servisDurumu()
+    return gonder(res, 200, 'application/json; charset=utf-8', JSON.stringify(d))
+  }
+  if (url.pathname === '/api/tarama' && req.method === 'POST') {
+    // Çerez SameSite=Strict; ayrıca özel başlık şart (başka siteden form gönderilemez).
+    if (req.headers['x-panel'] !== '1') return gonder(res, 403, 'text/plain; charset=utf-8', 'Yasak')
+    let eylem = ''
+    try {
+      eylem = JSON.parse(await govdeOku(req)).eylem
+    } catch {
+      return gonder(res, 400, 'text/plain; charset=utf-8', 'Hatalı istek')
+    }
+    if (eylem !== 'duraklat' && eylem !== 'surdur') return gonder(res, 400, 'text/plain; charset=utf-8', 'Hatalı eylem')
+    try {
+      await servisKomut(eylem === 'duraklat' ? 'stop' : 'start')
+    } catch (err) {
+      console.error(err)
+      return gonder(res, 500, 'application/json; charset=utf-8', JSON.stringify({ hata: 'systemctl başarısız' }))
+    }
+    return gonder(res, 200, 'application/json; charset=utf-8', JSON.stringify({ servis: await servisDurumu() }))
+  }
   return gonder(res, 404, 'text/plain; charset=utf-8', 'Bulunamadı')
 }
 

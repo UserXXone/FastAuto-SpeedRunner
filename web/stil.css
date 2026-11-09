@@ -41,3 +41,7 @@ button.seed.kopyalandi { color: var(--vurgu); }
 .giris input { font: inherit; padding: 11px 12px; border-radius: 8px; border: 1px solid var(--cizgi); background: var(--kart); color: var(--yazi); text-align: center; letter-spacing: .08em; }
 .giris button { font: inherit; padding: 11px; border: 0; border-radius: 8px; background: var(--vurgu); color: #fff; font-weight: 600; cursor: pointer; }
 .hata { color: var(--hata); }
+.kontrol { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-top: 14px; }
+.kontrol button { font: inherit; padding: 9px 16px; border: 0; border-radius: 8px; background: var(--uyari); color: #fff; font-weight: 600; cursor: pointer; }
+.kontrol button.duraklatildi { background: var(--vurgu); }
+.kontrol button:disabled { opacity: .6; cursor: wait; }
