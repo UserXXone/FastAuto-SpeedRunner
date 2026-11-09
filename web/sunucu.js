@@ -21,7 +21,7 @@ const PORT = Number(process.env.SEED_PANEL_PORT || 8790)
 const HOST = '127.0.0.1'
 const AYAR_DIZIN = process.env.SEED_PANEL_AYAR || '/root/.config/fastauto-seed'
 const AYAR = path.join(AYAR_DIZIN, 'ayar.json')
-const { VERI_DIZIN, YUKLEME_DIZIN, durumTopla, dogrulamaOku } = require('./veri')
+const { VERI_DIZIN, YUKLEME_DIZIN, durumTopla, dogrulamaOku, tumSeedler } = require('./veri')
 const DAGITIM_DIZIN = path.join(VERI_DIZIN, 'dagitim')
 const PANEL_URL = process.env.SEED_PANEL_URL || 'https://seed.zeax.dev'
 const MINECRAFT = '1.21.1'
@@ -274,12 +274,12 @@ function panelSayfasi () {
   <h2>Gerçek oyunla doğrulama <span class="soluk">(Minecraft 1.21.1 sunucusunda tek tek açıp bakar)</span></h2>
   <div class="kart">
     <div class="kontrol">
-      <label>En iyi <select id="dAdet"><option>10</option><option selected>30</option><option>50</option><option>100</option></select> doğrulanmamış seed'i</label>
+      <label>En iyi <select id="dAdet"><option>10</option><option selected>30</option><option>50</option><option>100</option><option>200</option><option>500</option><option>1000</option><option value="tumu">Tümü</option></select> doğrulanmamış seed'i</label>
       <button id="dBaslat" type="button">Doğrula</button>
       <button id="dDurdur" type="button" class="ikincil">Durdur</button>
       <span id="dBilgi" class="soluk"></span>
     </div>
-    <p class="soluk">Seed başına ~1 dakika. Çalışırken bu sunucudaki avcı duraklatılır, bitince kendiliğinden açılır.
+    <p class="soluk">Seed başına ~40 sn (100 seed ≈ 1 saat, 1000 seed ≈ 11 saat). Çalışırken bu sunucudaki avcı duraklatılır, bitince kendiliğinden açılır.
     <b>Gerçek süre</b> = oyundan ölçülen yol + ağaca yürüme + portal cezaları (eksik obsidyen, çakmak yok, su/gömülü).
     Görev süreleri (blaze, pearl, ejderha) henüz dahil değil.</p>
   </div>
@@ -409,6 +409,7 @@ async function istek (req, res) {
       calisiyor: (await servisDurumu(DOGRULAMA_BIRIM)) === 'active',
       durum: dg.durum,
       sayi: liste.length,
+      bekleyen: tumSeedler().filter((x) => !dg.sonuclar[x.seed]).length,
       enIyiler: liste.filter((r) => !r.hata).sort((a, b) => a.gercekSure - b.gercekSure).slice(0, 50),
       hatalar: liste.filter((r) => r.hata).slice(-5)
     }
@@ -453,7 +454,7 @@ async function istek (req, res) {
     try {
       if (g.eylem === 'baslat') {
         if (aktif) return gonder(res, 409, 'text/plain; charset=utf-8', 'Zaten çalışıyor')
-        const adet = Math.max(1, Math.min(100, Number(g.adet) || 30))
+        const adet = g.adet === 'tumu' ? 'tumu' : Math.max(1, Math.min(100000, Math.floor(Number(g.adet)) || 30))
         await dogrulamaBaslat(adet)
       } else if (g.eylem === 'durdur') {
         if (aktif) execFile('systemctl', ['stop', DOGRULAMA_BIRIM], { timeout: 200000 }, () => {})

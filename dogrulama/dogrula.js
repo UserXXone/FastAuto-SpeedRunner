@@ -11,6 +11,7 @@
 //
 //   node dogrulama/dogrula.js                 en iyi 30 doğrulanmamış seed
 //   node dogrulama/dogrula.js --adet 10
+//   node dogrulama/dogrula.js --adet tumu     bilinen tüm doğrulanmamış seed'ler
 //   node dogrulama/dogrula.js --seed 123 --seed 456
 //   node dogrulama/dogrula.js --yeniden       daha önce doğrulananları da tekrar dene
 //
@@ -24,7 +25,7 @@ const crypto = require('crypto')
 const { spawn, execFileSync } = require('child_process')
 const mineflayer = require('mineflayer')
 const { Vec3 } = require('vec3')
-const { durumTopla, DOGRULAMA_DIZIN, jsonOku } = require('../web/veri')
+const { tumSeedler, DOGRULAMA_DIZIN, jsonOku } = require('../web/veri')
 
 const JAR = process.env.MC_SUNUCU_JAR || path.join(__dirname, 'sunucu', 'server-1.21.1.jar')
 const JAR_SHA1 = '59353fb40c36d304f2035d51e7d6e6baa98dc05c'
@@ -465,7 +466,7 @@ function argumanlar () {
   const a = { adet: 30, seedler: [], yeniden: false }
   const v = process.argv.slice(2)
   for (let i = 0; i < v.length; i++) {
-    if (v[i] === '--adet') a.adet = Math.max(1, Math.min(200, Number(v[++i]) || 30))
+    if (v[i] === '--adet') { const x = v[++i]; a.adet = x === 'tumu' ? Infinity : Math.max(1, Number(x) || 30) }
     else if (v[i] === '--seed') a.seedler.push(String(v[++i]))
     else if (v[i] === '--yeniden') a.yeniden = true
     else { console.error('Bilinmeyen seçenek:', v[i]); process.exit(1) }
@@ -477,7 +478,7 @@ let durduruldu = false
 async function main () {
   const arg = argumanlar()
   const sonuclar = jsonOku(SONUC, {})
-  const liste = durumTopla().enIyiler
+  const liste = tumSeedler()
   const bilgi = new Map(liste.map((s) => [s.seed, s]))
   let hedef = arg.seedler.length
     ? arg.seedler

@@ -109,7 +109,7 @@ async function dogrulamaIstek (govde) {
   $('#dBilgi').textContent = r.ok ? 'İstek gönderildi…' : await r.text()
   setTimeout(yenile, 1500)
 }
-$('#dBaslat') && $('#dBaslat').addEventListener('click', () => dogrulamaIstek({ eylem: 'baslat', adet: Number($('#dAdet').value) }))
+$('#dBaslat') && $('#dBaslat').addEventListener('click', () => dogrulamaIstek({ eylem: 'baslat', adet: $('#dAdet').value === 'tumu' ? 'tumu' : Number($('#dAdet').value) }))
 $('#dDurdur') && $('#dDurdur').addEventListener('click', () => dogrulamaIstek({ eylem: 'durdur' }))
 
 function dogrulamaCiz (dg) {
@@ -118,7 +118,7 @@ function dogrulamaCiz (dg) {
   $('#dBaslat').disabled = dg.calisiyor
   $('#dDurdur').disabled = !dg.calisiyor
   $('#duraklat').disabled = dg.calisiyor
-  let bilgi = `${dg.sayi} seed doğrulandı.`
+  let bilgi = `${dg.sayi} seed doğrulandı, ${bin(dg.bekleyen)} seed sırada bekliyor.`
   if (dg.calisiyor && du) bilgi = `Çalışıyor: ${du.biten}/${du.toplam} — ${du.simdiki || ''} (${du.asama})`
   else if (du && du.asama === 'durduruldu') bilgi += ' Son çalışma durduruldu.'
   $('#dBilgi').textContent = bilgi

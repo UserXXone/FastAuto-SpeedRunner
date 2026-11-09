@@ -29,7 +29,7 @@ function dogrulamaOku () {
 
 // ---------------------------------------------------------------- veri
 
-function durumTopla () {
+function durumTopla (sinir = 100) {
   const pcler = []
   const seedler = new Map()
   const okunan = new Map()  // pc -> en yeni veri (aynı numara iki yerden gelirse)
@@ -72,9 +72,34 @@ function durumTopla () {
     }
   }
   pcler.sort((a, b) => a.pc - b.pc)
-  const enIyiler = [...seedler.values()].sort((a, b) => a.sn - b.sn).slice(0, 100)
+  const enIyiler = [...seedler.values()].sort((a, b) => a.sn - b.sn).slice(0, sinir)
   return { zaman: Math.floor(Date.now() / 1000), pcler, enIyiler }
 }
 
 
-module.exports = { VERI_DIZIN, YUKLEME_DIZIN, DOGRULAMA_DIZIN, CEVRIMDISI_SN, durumTopla, dogrulamaOku, jsonOku }
+// Bilinen tüm seed'ler: her PC'nin .json'undaki en iyi 100 + bu sunucudaki
+// txt dosyalarındaki en iyi 1000. Doğrulayıcı "tümü" seçilince bunu kullanır.
+function tumSeedler () {
+  const m = new Map()
+  const ekle = (s) => { const e = m.get(s.seed); if (!e || s.sn < e.sn) m.set(s.seed, s) }
+  for (const s of durumTopla(Infinity).enIyiler) ekle(s)
+  let txtler = []
+  try { txtler = fs.readdirSync(VERI_DIZIN).filter((f) => /^seedler-pc\d+\.txt$/.test(f)) } catch { /* */ }
+  const xz = (t) => t.split('=')[1].split(',').map(Number)
+  for (const f of txtler) {
+    let satirlar = []
+    try { satirlar = fs.readFileSync(path.join(VERI_DIZIN, f), 'utf8').split('\n') } catch { continue }
+    for (const l of satirlar) {
+      if (!l || l[0] === '#') continue
+      const a = l.split('\t')
+      if (a.length < 9 || !/^-?\d{1,20}$/.test(a[0])) continue
+      ekle({
+        seed: a[0], sn: Number(a[1]), spawn: xz(a[2]), portal: xz(a[3]), bastion: xz(a[4]), fortress: xz(a[5]),
+        kale: xz(a[6]), nether: Number(a[7].split('=')[1]), biyom: (a[8].split(':')[1] || '?').trim()
+      })
+    }
+  }
+  return [...m.values()].sort((a, b) => a.sn - b.sn)
+}
+
+module.exports = { tumSeedler, VERI_DIZIN, YUKLEME_DIZIN, DOGRULAMA_DIZIN, CEVRIMDISI_SN, durumTopla, dogrulamaOku, jsonOku }
