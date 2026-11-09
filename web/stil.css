@@ -45,3 +45,8 @@ button.seed.kopyalandi { color: var(--vurgu); }
 .kontrol button { font: inherit; padding: 9px 16px; border: 0; border-radius: 8px; background: var(--uyari); color: #fff; font-weight: 600; cursor: pointer; }
 .kontrol button.duraklatildi { background: var(--vurgu); }
 .kontrol button:disabled { opacity: .6; cursor: wait; }
+.kart.uyari { border-color: var(--uyari); color: var(--uyari); grid-column: 1 / -1; }
+.kart.yardim ol { margin: 8px 0; padding-left: 20px; }
+.kart.yardim p { margin: 6px 0; }
+a.dugme { display: inline-block; padding: 9px 16px; border-radius: 8px; background: var(--elmas); color: #fff; font-weight: 600; text-decoration: none; }
+code { font-family: ui-monospace, Consolas, monospace; font-size: .92em; }

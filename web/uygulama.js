@@ -63,6 +63,20 @@ $('#duraklat') && $('#duraklat').addEventListener('click', async (e) => {
   } catch { b.textContent = 'Bağlantı yok'; b.disabled = false }
 })
 
+$('#elleDosya') && $('#elleDosya').addEventListener('change', async (e) => {
+  const f = e.target.files[0]
+  if (!f) return
+  const sonuc = $('#elleSonuc')
+  sonuc.textContent = 'Yükleniyor…'
+  try {
+    const r = await fetch('/api/yukle-elle', { method: 'POST', headers: { 'X-Panel': '1', 'Content-Type': 'application/json' }, body: await f.text() })
+    sonuc.textContent = await r.text()
+    sonuc.className = r.ok ? '' : 'hata'
+    if (r.ok) yenile()
+  } catch { sonuc.textContent = 'Bağlantı yok'; sonuc.className = 'hata' }
+  e.target.value = ''
+})
+
 function ciz (d) {
   kontrolCiz(d.servis)
   const aktif = d.pcler.filter((p) => p.cevrimici)
@@ -74,9 +88,13 @@ function ciz (d) {
     kart('Çevrimiçi bilgisayar', `${aktif.length} / ${d.pcler.length}`),
     kart('Toplam hız', `${bin(Math.round(toplamHiz))} düzen/sn`),
     kart('Taranan yapı düzeni', bin(toplamTaranan)),
-    kart('En iyi seed', d.enIyiler.length ? `${d.enIyiler[0].sn.toFixed(1)} sn` : '—'),
+    kart('En iyi yol puanı', d.enIyiler.length ? d.enIyiler[0].sn.toFixed(1) : '—'),
     kart('Uygun seed (bu oturumlar)', bin(toplamUygun))
   )
+  const toplamlar = new Set(d.pcler.map((p) => p.toplam))
+  if (toplamlar.size > 1) {
+    $('#ozet').append(el('div', 'kart uyari', `Dikkat: PC'lerde "toplam" farklı (${[...toplamlar].join(', ')}). Hepsinde aynı olmalı, yoksa bazı seed'ler iki kez taranır ya da atlanır.`))
+  }
 
   $('#pcler').replaceChildren(...d.pcler.map((p) => {
     const k = el('div', 'kart pc')
@@ -84,6 +102,7 @@ function ciz (d) {
     baslik.append(el('span', 'durum' + (p.cevrimici ? ' acik' : '')), `PC ${p.pc} / ${p.toplam}`)
     const dl = el('dl')
     const satir = (a, b) => dl.append(el('dt', null, a), el('dd', null, b))
+    satir('Kaynak', p.kaynak === 'yukleme' ? 'Windows (yükleme)' : 'VDS')
     satir('Durum', p.cevrimici ? `çalışıyor (${p.cekirdek} çekirdek)` : `kapalı — ${once(p.sonGorulme, d.zaman)}`)
     satir('Hız', `${bin(Math.round(p.hiz))} düzen/sn`)
     satir('Bu oturum', sure(p.oturumSn))

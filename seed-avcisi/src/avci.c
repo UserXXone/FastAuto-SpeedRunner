@@ -30,6 +30,7 @@
 
 #ifdef _WIN32
 #include <windows.h>
+#include <wininet.h>
 typedef HANDLE thread_t;
 static CRITICAL_SECTION g_lock;
 #define LOCK() EnterCriticalSection(&g_lock)
@@ -437,6 +438,123 @@ static void kalanYaz(char *out, size_t n, double sn)
     else { sureYaz(out, n, sn); }
 }
 
+/* ------------------------------------------------------------------------- */
+/* Panele otomatik yükleme (sadece Windows). Aynı klasörde panel.txt varsa
+ * (1. satır: https://seed.zeax.dev, 2. satır: yükleme anahtarı) .json
+ * durum dosyası 30 sn'de bir panele gönderilir. */
+
+static int g_yukAcik = 0;            /* panel.txt bulundu mu */
+static volatile int g_yukDurum = 0;  /* 0: henüz yok, 1: tamam, 2: hata */
+static volatile long g_yukKod = 0;   /* son HTTP kodu ya da Windows hata kodu */
+static volatile time_t g_yukZaman = 0;
+
+#ifdef _WIN32
+static char g_panelHost[256], g_anahtar[128];
+static INTERNET_PORT g_panelPort = 443;
+static int g_panelHttps = 1;
+
+static void kirp(char *t)
+{
+    size_t n = strlen(t);
+    while (n && (t[n - 1] == '\r' || t[n - 1] == '\n' || t[n - 1] == ' ' || t[n - 1] == '\t')) t[--n] = 0;
+}
+
+static void panelAyarOku(void)
+{
+    FILE *f = fopen("panel.txt", "r");
+    if (!f) return;
+    char url[300] = "", key[160] = "";
+    if (!fgets(url, sizeof url, f) || !fgets(key, sizeof key, f)) { fclose(f); return; }
+    fclose(f);
+    kirp(url); kirp(key);
+    const char *h = url;
+    if (!strncmp(h, "https://", 8)) { h += 8; g_panelHttps = 1; g_panelPort = 443; }
+    else if (!strncmp(h, "http://", 7)) { h += 7; g_panelHttps = 0; g_panelPort = 80; }
+    snprintf(g_panelHost, sizeof g_panelHost, "%s", h);
+    char *e = strchr(g_panelHost, '/'); if (e) *e = 0;
+    e = strchr(g_panelHost, ':'); if (e) { *e = 0; g_panelPort = (INTERNET_PORT)atoi(e + 1); }
+    snprintf(g_anahtar, sizeof g_anahtar, "%s", key);
+    g_yukAcik = g_panelHost[0] && g_anahtar[0];
+}
+
+static int yukle(void)
+{
+    char yol[600];
+    snprintf(yol, sizeof yol, "%s.json", A.cikti);
+    FILE *f = fopen(yol, "rb");
+    if (!f) return 0;
+    static char buf[256 * 1024];
+    size_t n = fread(buf, 1, sizeof buf, f);
+    fclose(f);
+    if (!n) return 0;
+
+    int ok = 0;
+    DWORD zaman = 20000;
+    HINTERNET net = InternetOpenA("FastAuto-SeedAvcisi/" PROGRAM_SURUM, INTERNET_OPEN_TYPE_PRECONFIG, NULL, NULL, 0);
+    if (!net) { g_yukKod = (long)GetLastError(); return 0; }
+    InternetSetOptionA(net, INTERNET_OPTION_CONNECT_TIMEOUT, &zaman, sizeof zaman);
+    InternetSetOptionA(net, INTERNET_OPTION_SEND_TIMEOUT, &zaman, sizeof zaman);
+    InternetSetOptionA(net, INTERNET_OPTION_RECEIVE_TIMEOUT, &zaman, sizeof zaman);
+    HINTERNET con = InternetConnectA(net, g_panelHost, g_panelPort, NULL, NULL, INTERNET_SERVICE_HTTP, 0, 0);
+    if (con) {
+        DWORD bayrak = INTERNET_FLAG_RELOAD | INTERNET_FLAG_NO_CACHE_WRITE | INTERNET_FLAG_NO_COOKIES | INTERNET_FLAG_NO_UI;
+        if (g_panelHttps) bayrak |= INTERNET_FLAG_SECURE;
+        HINTERNET req = HttpOpenRequestA(con, "POST", "/api/yukle", NULL, NULL, NULL, bayrak, 0);
+        if (req) {
+            char baslik[300];
+            snprintf(baslik, sizeof baslik, "Content-Type: application/json\r\nX-Yukleme-Anahtari: %s\r\n", g_anahtar);
+            if (HttpSendRequestA(req, baslik, (DWORD)-1L, buf, (DWORD)n)) {
+                DWORD kod = 0, sz = sizeof kod;
+                if (HttpQueryInfoA(req, HTTP_QUERY_STATUS_CODE | HTTP_QUERY_FLAG_NUMBER, &kod, &sz, NULL)) {
+                    g_yukKod = (long)kod;
+                    ok = kod == 200;
+                }
+            } else {
+                g_yukKod = (long)GetLastError();
+            }
+            InternetCloseHandle(req);
+        } else g_yukKod = (long)GetLastError();
+        InternetCloseHandle(con);
+    } else g_yukKod = (long)GetLastError();
+    InternetCloseHandle(net);
+    return ok;
+}
+
+static void yukleVeIsaretle(void)
+{
+    int ok = yukle();
+    g_yukDurum = ok ? 1 : 2;
+    if (ok) g_yukZaman = time(NULL);
+}
+
+static DWORD WINAPI yukleyici(LPVOID arg)
+{
+    (void)arg;
+    int bekle = 8;  /* ilk yükleme: ilk .json yazıldıktan hemen sonra */
+    while (!g_dur) {
+        for (int i = 0; i < bekle * 10 && !g_dur; i++) Sleep(100);
+        if (g_dur) break;
+        yukleVeIsaretle();
+        bekle = 30;
+    }
+    return 0;
+}
+#endif
+
+static void yuklemeYazi(char *out, size_t n)
+{
+    if (!g_yukAcik) { snprintf(out, n, "kapali (panel.txt yok)"); return; }
+    if (g_yukDurum == 0) { snprintf(out, n, "bekliyor..."); return; }
+    if (g_yukDurum == 1) {
+        struct tm *t = localtime((const time_t *)&g_yukZaman);
+        snprintf(out, n, "tamam, son yukleme %02d:%02d:%02d", t ? t->tm_hour : 0, t ? t->tm_min : 0, t ? t->tm_sec : 0);
+        return;
+    }
+    if (g_yukKod == 401) snprintf(out, n, "HATA: anahtar yanlis (panelden paketi yeniden indir)");
+    else if (g_yukKod >= 100 && g_yukKod < 600) snprintf(out, n, "HATA: panel %ld dondu, tekrar denenecek", g_yukKod);
+    else snprintf(out, n, "HATA: baglanti yok (kod %ld), tekrar denenecek", g_yukKod);
+}
+
 #define SATIR "\033[K\n"
 
 static void paneliCiz(double gecen, double hiz)
@@ -471,6 +589,11 @@ static void paneliCiz(double gecen, double hiz)
     printf("  Son denenen    : %" PRId64 SATIR, (int64_t)g_sonSeed);
     printf("  Bu oturumda    : %s seed denendi, %s aday duzen, %s uygun seed" SATIR, b3, b5, b4);
     printf("  Sonuc dosyasi  : %s  (30 sn'de bir kaydedilir)" SATIR, A.cikti);
+    if (g_yukAcik) {
+        char y[120];
+        yuklemeYazi(y, sizeof y);
+        printf("  Panele yukleme : %s" SATIR, y);
+    }
     printf(SATIR);
     printf("  EN IYI SEED'LER  (sn = tahmini yol suresi, dusuk = iyi)" SATIR);
     printf("  ---------------------------------------------------------------------------" SATIR);
@@ -635,6 +758,14 @@ int main(int argc, char **argv)
 #endif
     }
 
+#ifdef _WIN32
+    panelAyarOku();
+    if (g_yukAcik) {
+        printf("Panele yukleme acik: %s\n", g_panelHost);
+        CreateThread(NULL, 0, yukleyici, NULL, 0, NULL);
+    }
+#endif
+
     time_t bas = time(NULL), sonKayit = bas;
     if (g_ansi) printf("\033[2J");
     while (!g_dur) {
@@ -649,8 +780,9 @@ int main(int argc, char **argv)
             paneliCiz(gecen, hiz);
         } else if (!g_sessiz) {
             double enIyi = g_topN ? g_top[0].sn : 0;
-            printf("\r%6.0fs | %.0f yapi duzeni/sn | aday %" PRIu64 " | uygun seed %" PRIu64 " | en iyi %.1f sn   ",
-                   gecen, hiz, gecA, bul, enIyi);
+            printf("\r%6.0fs | %.0f yapi duzeni/sn | aday %" PRIu64 " | uygun seed %" PRIu64 " | en iyi %.1f sn%s   ",
+                   gecen, hiz, gecA, bul, enIyi,
+                   !g_yukAcik ? "" : g_yukDurum == 1 ? " | panel: tamam" : g_yukDurum == 2 ? " | panel: HATA" : " | panel: ...");
             fflush(stdout);
         }
         if ((long long)gecen % 5 == 0) jsonYaz(gecen, hiz);
@@ -668,5 +800,12 @@ int main(int argc, char **argv)
     }
     kaydet(1);
     printf("Kaydedildi: %s (%d seed)\n", A.cikti, g_topN);
+#ifdef _WIN32
+    if (g_yukAcik) {
+        jsonYaz(g_buOturum, 0);
+        yukleVeIsaretle();
+        printf("Panele son durum %s.\n", g_yukDurum == 1 ? "gonderildi" : "GONDERILEMEDI");
+    }
+#endif
     return 0;
 }

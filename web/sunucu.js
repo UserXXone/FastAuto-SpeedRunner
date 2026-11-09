@@ -15,14 +15,19 @@ const { execFile } = require('child_process')
 const fs = require('fs')
 const path = require('path')
 const crypto = require('crypto')
+const zlib = require('zlib')
 
 const PORT = Number(process.env.SEED_PANEL_PORT || 8790)
 const HOST = '127.0.0.1'
 const AYAR_DIZIN = process.env.SEED_PANEL_AYAR || '/root/.config/fastauto-seed'
 const AYAR = path.join(AYAR_DIZIN, 'ayar.json')
 const VERI_DIZIN = process.env.SEED_VERI_DIZIN || path.join(__dirname, '..', 'seed-avcisi')
+const YUKLEME_DIZIN = path.join(VERI_DIZIN, 'yuklenen')
+const DAGITIM_DIZIN = path.join(VERI_DIZIN, 'dagitim')
+const PANEL_URL = process.env.SEED_PANEL_URL || 'https://seed.zeax.dev'
+const MINECRAFT = '1.21.1'
 const OTURUM_GUN = 30
-const CEVRIMDISI_SN = 60
+const CEVRIMDISI_SN = 90  // Windows PC'ler 30 sn'de bir yükler
 
 // ---------------------------------------------------------------- ayarlar
 
@@ -109,22 +114,138 @@ function servisKomut (komut) {
   })
 }
 
+// ---------------------------------------------------------------- yükleme (Windows PC'ler)
+
+// Anahtar giriş kodundan türetilir: kod değişince eski paketler de geçersiz olur.
+function yuklemeAnahtari (ayar) {
+  return imza(ayar, 'yukleme-anahtari').slice(0, 32).toUpperCase()
+}
+
+function anahtarDogru (ayar, gelen) {
+  const a = Buffer.from(yuklemeAnahtari(ayar))
+  const b = Buffer.from(String(gelen || '').trim().toUpperCase())
+  return a.length === b.length && crypto.timingSafeEqual(a, b)
+}
+
+const tam = (x, min, max) => Number.isInteger(x) && x >= min && x <= max
+const nokta = (p) => Array.isArray(p) && p.length === 2 && p.every((v) => tam(v, -30000000, 30000000))
+const SEED_RE = /^-?\d{1,20}$/
+
+// Gelen JSON'dan sadece bilinen alanları alır; gerisini atar.
+function yuklemeTemizle (d) {
+  if (!d || typeof d !== 'object') return null
+  if (!tam(d.pc, 1, 64) || !tam(d.toplam, 1, 64) || d.pc > d.toplam) return null
+  if (d.minecraft !== MINECRAFT) return null
+  const o = {
+    program: String(d.program || '').slice(0, 20),
+    minecraft: MINECRAFT,
+    pc: d.pc,
+    toplam: d.toplam,
+    guncellendi: Math.floor(Date.now() / 1000),  // PC saati yanlış olabilir
+    kaynak: 'yukleme',
+    sonSeed: SEED_RE.test(d.sonSeed) ? d.sonSeed : '0'
+  }
+  for (const k of ['cekirdek', 'oturumSn', 'toplamSn', 'hiz', 'taranan', 'dilim', 'denenenSeed', 'adayDuzen', 'uygunSeed']) {
+    o[k] = typeof d[k] === 'number' && isFinite(d[k]) && d[k] >= 0 ? d[k] : 0
+  }
+  o.enIyiler = (Array.isArray(d.enIyiler) ? d.enIyiler.slice(0, 100) : [])
+    .filter((x) => x && SEED_RE.test(x.seed) && typeof x.sn === 'number' && isFinite(x.sn) &&
+      nokta(x.spawn) && nokta(x.portal) && nokta(x.bastion) && nokta(x.fortress) && nokta(x.kale) && tam(x.nether, 0, 1e6))
+    .map((x) => ({
+      seed: x.seed, sn: x.sn, spawn: x.spawn, portal: x.portal, bastion: x.bastion, fortress: x.fortress,
+      kale: x.kale, nether: x.nether, biyom: String(x.biyom || '?').slice(0, 40)
+    }))
+  return o
+}
+
+function yuklemeKaydet (o) {
+  fs.mkdirSync(YUKLEME_DIZIN, { recursive: true })
+  const yol = path.join(YUKLEME_DIZIN, `seedler-pc${o.pc}.txt.json`)
+  fs.writeFileSync(yol + '.tmp', JSON.stringify(o))
+  fs.renameSync(yol + '.tmp', yol)
+}
+
+const sonYukleme = new Map()  // ip -> zaman (çok sık yüklemeyi engelle)
+
+// ---------------------------------------------------------------- windows paketi (zip)
+
+function zipYap (dosyalar) {
+  const t = new Date()
+  const saat = (t.getHours() << 11) | (t.getMinutes() << 5) | (t.getSeconds() >> 1)
+  const gun = ((t.getFullYear() - 1980) << 9) | ((t.getMonth() + 1) << 5) | t.getDate()
+  const parca = []
+  const merkez = []
+  let ofs = 0
+  for (const f of dosyalar) {
+    const ad = Buffer.from(f.ad)
+    const crc = zlib.crc32(f.veri)
+    const sik = zlib.deflateRawSync(f.veri, { level: 9 })
+    const y = Buffer.alloc(30)
+    y.writeUInt32LE(0x04034b50, 0); y.writeUInt16LE(20, 4); y.writeUInt16LE(8, 8)
+    y.writeUInt16LE(saat, 10); y.writeUInt16LE(gun, 12); y.writeUInt32LE(crc, 14)
+    y.writeUInt32LE(sik.length, 18); y.writeUInt32LE(f.veri.length, 22); y.writeUInt16LE(ad.length, 26)
+    const m = Buffer.alloc(46)
+    m.writeUInt32LE(0x02014b50, 0); m.writeUInt16LE(20, 4); m.writeUInt16LE(20, 6); m.writeUInt16LE(8, 10)
+    m.writeUInt16LE(saat, 12); m.writeUInt16LE(gun, 14); m.writeUInt32LE(crc, 16)
+    m.writeUInt32LE(sik.length, 20); m.writeUInt32LE(f.veri.length, 24); m.writeUInt16LE(ad.length, 28)
+    m.writeUInt32LE(ofs, 42)
+    parca.push(y, ad, sik)
+    merkez.push(m, ad)
+    ofs += 30 + ad.length + sik.length
+  }
+  const md = Buffer.concat(merkez)
+  const son = Buffer.alloc(22)
+  son.writeUInt32LE(0x06054b50, 0); son.writeUInt16LE(dosyalar.length, 8); son.writeUInt16LE(dosyalar.length, 10)
+  son.writeUInt32LE(md.length, 12); son.writeUInt32LE(ofs, 16)
+  return Buffer.concat([...parca, md, son])
+}
+
+function windowsPaketi (ayar) {
+  const crlf = (x) => Buffer.from(x.replace(/\r?\n/g, '\r\n'))
+  return zipYap([
+    { ad: 'seed-avcisi/seed-avcisi.exe', veri: fs.readFileSync(path.join(DAGITIM_DIZIN, 'seed-avcisi.exe')) },
+    { ad: 'seed-avcisi/baslat.bat', veri: crlf(fs.readFileSync(path.join(DAGITIM_DIZIN, 'baslat.bat'), 'utf8')) },
+    { ad: 'seed-avcisi/panel.txt', veri: crlf(`${PANEL_URL}\n${yuklemeAnahtari(ayar)}\n`) },
+    {
+      ad: 'seed-avcisi/OKU-BENI.txt',
+      veri: crlf(`FastAuto Seed Avcisi - Windows paketi
+
+1. Bu klasoru masaustune cikar (zip icinden calistirma).
+2. baslat.bat'a cift tikla.
+3. Ilk seferde iki soru sorar:
+   - Bu bilgisayarin numarasi: her PC'ye farkli numara (1, 2, 3, 4, 5).
+     VDS 6 numarali, onu kullanma.
+   - Toplam kac bilgisayar: hepsinde ayni sayi (6).
+4. Sonuclar 30 saniyede bir ${PANEL_URL} paneline otomatik gider.
+   Ekranda "Panele yukleme: tamam" yazmali.
+
+panel.txt gizli yukleme anahtarini icerir, kimseyle paylasma.
+`)
+    }
+  ])
+}
+
 // ---------------------------------------------------------------- veri
 
 function durumTopla () {
   const pcler = []
   const seedler = new Map()
-  let dosyalar = []
-  try {
-    dosyalar = fs.readdirSync(VERI_DIZIN).filter((f) => f.endsWith('.txt.json'))
-  } catch { /* dizin yok */ }
-  for (const f of dosyalar) {
-    let d
+  const okunan = new Map()  // pc -> en yeni veri (aynı numara iki yerden gelirse)
+  for (const dizin of [VERI_DIZIN, YUKLEME_DIZIN]) {
+    let dosyalar = []
     try {
-      d = JSON.parse(fs.readFileSync(path.join(VERI_DIZIN, f), 'utf8'))
-    } catch {
-      continue
+      dosyalar = fs.readdirSync(dizin).filter((f) => f.endsWith('.txt.json'))
+    } catch { /* dizin yok */ }
+    for (const f of dosyalar) {
+      try {
+        const d = JSON.parse(fs.readFileSync(path.join(dizin, f), 'utf8'))
+        if (!d.kaynak) d.kaynak = 'yerel'
+        const eski = okunan.get(d.pc)
+        if (!eski || d.guncellendi > eski.guncellendi) okunan.set(d.pc, d)
+      } catch { /* bozuk dosya */ }
     }
+  }
+  for (const d of okunan.values()) {
     const yas = Date.now() / 1000 - d.guncellendi
     pcler.push({
       pc: d.pc,
@@ -140,7 +261,8 @@ function durumTopla () {
       sonSeed: d.sonSeed,
       denenenSeed: d.denenenSeed,
       uygunSeed: d.uygunSeed,
-      minecraft: d.minecraft
+      minecraft: d.minecraft,
+      kaynak: d.kaynak
     })
     for (const s of d.enIyiler || []) {
       const eski = seedler.get(s.seed)
@@ -187,11 +309,23 @@ function panelSayfasi () {
   <span class="soluk" id="kontrolBilgi">Sadece bu sunucudaki (VDS) taramayı yönetir. Duraklatınca ilerleme kaydedilir, devam edince kaldığı yerden sürer.</span></div>
   <h2>Bilgisayarlar</h2>
   <section id="pcler" class="kartlar"></section>
-  <h2>En iyi seed'ler <span class="soluk">(sn = tahmini yol süresi, düşük = iyi)</span></h2>
+  <h2>En iyi seed'ler <span class="soluk">(yol puanı = tahmini yol süresi saniye, düşük = iyi; oyunun tamamı değil)</span></h2>
   <div class="tablo-kutu"><table id="seedler"><thead><tr>
-    <th>#</th><th>Seed</th><th>sn</th><th>Biyom</th><th>Portal</th><th>Nether yolu</th><th>Kale</th><th>PC</th>
+    <th>#</th><th>Seed</th><th>Yol puanı</th><th>Biyom</th><th>Portal</th><th>Nether yolu</th><th>Kale</th><th>PC</th>
   </tr></thead><tbody></tbody></table></div>
   <p class="soluk" id="guncelleme"></p>
+  <h2>Windows bilgisayar ekle</h2>
+  <div class="kart yardim">
+    <p><a class="dugme" href="/indir/seed-avcisi-windows.zip">Windows paketini indir (.zip)</a></p>
+    <ol>
+      <li>Zip'i bilgisayarda masaüstüne çıkar, <b>baslat.bat</b>'a çift tıkla.</li>
+      <li>Numara sorunca her PC'ye farklı numara ver (<b>1–5</b>; VDS 6 numara). Toplam: <b>6</b>.</li>
+      <li>Sonuçlar 30 sn'de bir buraya kendiliğinden gelir. Program ekranında “Panele yükleme: tamam” yazmalı.</li>
+    </ol>
+    <p class="soluk">Paket gizli yükleme anahtarını içerir, paylaşma. Giriş kodunu değiştirirsen paketi yeniden indir.</p>
+    <p class="soluk">Otomatik yükleme çalışmazsa (eski Windows 7): PC'deki <code>seedler-pcN.txt.json</code> dosyasını buradan yükle:
+      <input type="file" id="elleDosya" accept=".json"> <span id="elleSonuc"></span></p>
+  </div>
 </main>
 <script src="/uygulama.js"></script>`)
 }
@@ -256,6 +390,27 @@ async function istek (req, res) {
     })
   }
 
+  if (url.pathname === '/api/yukle' && req.method === 'POST') {
+    const ip = istemciIp(req)
+    if (engelliMi(ip)) return gonder(res, 429, 'text/plain; charset=utf-8', 'Çok fazla hatalı deneme')
+    if (!anahtarDogru(ayar, req.headers['x-yukleme-anahtari'])) {
+      hataKaydet(ip)
+      return gonder(res, 401, 'text/plain; charset=utf-8', 'Anahtar yanlış')
+    }
+    const simdi = Date.now()
+    if (simdi - (sonYukleme.get(ip) || 0) < 3000) return gonder(res, 429, 'text/plain; charset=utf-8', 'Çok sık')
+    sonYukleme.set(ip, simdi)
+    let o
+    try {
+      o = yuklemeTemizle(JSON.parse(await govdeOku(req, 256 * 1024)))
+    } catch {
+      return gonder(res, 400, 'text/plain; charset=utf-8', 'Hatalı JSON')
+    }
+    if (!o) return gonder(res, 400, 'text/plain; charset=utf-8', 'Geçersiz veri (sürüm ya da pc numarası)')
+    yuklemeKaydet(o)
+    return gonder(res, 200, 'text/plain; charset=utf-8', 'tamam')
+  }
+
   if (url.pathname === '/cikis') {
     return gonder(res, 303, 'text/plain', '', { Location: '/', 'Set-Cookie': 'seed_oturum=; Path=/; Max-Age=0; HttpOnly; Secure; SameSite=Strict' })
   }
@@ -271,6 +426,29 @@ async function istek (req, res) {
     const d = durumTopla()
     d.servis = await servisDurumu()
     return gonder(res, 200, 'application/json; charset=utf-8', JSON.stringify(d))
+  }
+  if (url.pathname === '/indir/seed-avcisi-windows.zip') {
+    let zip
+    try {
+      zip = windowsPaketi(ayar)
+    } catch (err) {
+      console.error(err)
+      return gonder(res, 500, 'text/plain; charset=utf-8', 'Paket hazırlanamadı (seed-avcisi/dagitim eksik)')
+    }
+    return gonder(res, 200, 'application/zip', zip, { 'Content-Disposition': 'attachment; filename="seed-avcisi-windows.zip"' })
+  }
+  if (url.pathname === '/api/yukle-elle' && req.method === 'POST') {
+    if (req.headers['x-panel'] !== '1') return gonder(res, 403, 'text/plain; charset=utf-8', 'Yasak')
+    let o
+    try {
+      o = yuklemeTemizle(JSON.parse(await govdeOku(req, 256 * 1024)))
+    } catch {
+      return gonder(res, 400, 'text/plain; charset=utf-8', 'Dosya okunamadı (seedler-pcN.txt.json olmalı)')
+    }
+    if (!o) return gonder(res, 400, 'text/plain; charset=utf-8', 'Geçersiz dosya (sürüm 1.21.1 ve pc numarası olmalı)')
+    o.guncellendi = 0  // elle yüklenen PC çevrimiçi sayılmasın
+    yuklemeKaydet(o)
+    return gonder(res, 200, 'text/plain; charset=utf-8', `PC ${o.pc} yüklendi (${o.enIyiler.length} seed)`)
   }
   if (url.pathname === '/api/tarama' && req.method === 'POST') {
     // Çerez SameSite=Strict; ayrıca özel başlık şart (başka siteden form gönderilemez).

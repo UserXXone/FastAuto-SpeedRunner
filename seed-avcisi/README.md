@@ -17,7 +17,7 @@ Ağaç kesme, blaze kesme ve ejderha dövüşü gibi görevler her seed'de aşa�
 
 ## Windows'ta kullanım (Windows 7, 8, 10, 11)
 
-1. `dagitim` klasörünü (`seed-avcisi.exe` + `baslat.bat`) bilgisayara kopyala. Masaüstü olur.
+1. O bilgisayardan **seed.zeax.dev**'e gir, en alttaki **Windows paketini indir** düğmesine bas. Zip'i masaüstüne çıkar. Paketin içinde `panel.txt` var: sonuçlar 30 saniyede bir panele kendiliğinden gider. (Sadece `dagitim` klasörünü kopyalarsan da çalışır ama panele yüklemez.)
 2. `baslat.bat`'a çift tıkla.
 3. İlk seferde iki soru sorar:
    - **Bu bilgisayarın numarası:** Her bilgisayara farklı bir numara ver: 1, 2, 3...
@@ -28,6 +28,8 @@ Ağaç kesme, blaze kesme ve ejderha dövüşü gibi görevler her seed'de aşa�
 5. Durdurmak için **Ctrl+C**. Tekrar çalıştırınca **kaldığı yerden devam eder**. Sonuçlar her 30 saniyede bir kaydedilir.
 
 Sonuç dosyası: `seedler-pc1.txt` (numara bilgisayara göre değişir).
+
+Panele yükleme durumu program ekranında görünür (`Panele yukleme : tamam`). Windows 7'de eski Internet Explorer yüzünden bağlantı kurulamazsa (`HATA: baglanti yok`), `seedler-pcN.txt.json` dosyasını panelden elle yükleyebilirsin.
 
 > Program varsayılan olarak **düşük öncelikte** çalışır. Bilgisayarı kullanırken (oyun, tarayıcı) yavaşlık hissetmezsin, boşta kalınca tam hız tarar.
 
