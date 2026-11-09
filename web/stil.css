@@ -50,3 +50,7 @@ button.seed.kopyalandi { color: var(--vurgu); }
 .kart.yardim p { margin: 6px 0; }
 a.dugme { display: inline-block; padding: 9px 16px; border-radius: 8px; background: var(--elmas); color: #fff; font-weight: 600; text-decoration: none; }
 code { font-family: ui-monospace, Consolas, monospace; font-size: .92em; }
+td.vurgu { color: var(--elmas); font-weight: 600; }
+td.not { white-space: normal; min-width: 220px; color: var(--soluk); font-size: 13px; }
+.kontrol button.ikincil { background: var(--soluk); }
+.kontrol select { font: inherit; padding: 6px; border-radius: 6px; border: 1px solid var(--cizgi); background: var(--kart); color: var(--yazi); }

@@ -21,13 +21,11 @@ const PORT = Number(process.env.SEED_PANEL_PORT || 8790)
 const HOST = '127.0.0.1'
 const AYAR_DIZIN = process.env.SEED_PANEL_AYAR || '/root/.config/fastauto-seed'
 const AYAR = path.join(AYAR_DIZIN, 'ayar.json')
-const VERI_DIZIN = process.env.SEED_VERI_DIZIN || path.join(__dirname, '..', 'seed-avcisi')
-const YUKLEME_DIZIN = path.join(VERI_DIZIN, 'yuklenen')
+const { VERI_DIZIN, YUKLEME_DIZIN, durumTopla, dogrulamaOku } = require('./veri')
 const DAGITIM_DIZIN = path.join(VERI_DIZIN, 'dagitim')
 const PANEL_URL = process.env.SEED_PANEL_URL || 'https://seed.zeax.dev'
 const MINECRAFT = '1.21.1'
 const OTURUM_GUN = 30
-const CEVRIMDISI_SN = 90  // Windows PC'ler 30 sn'de bir yükler
 
 // ---------------------------------------------------------------- ayarlar
 
@@ -101,10 +99,23 @@ function hataKaydet (ip) {
 // ---------------------------------------------------------------- servis kontrolü
 
 const SERVIS = 'seed-avci'
+const DOGRULAMA_BIRIM = 'seed-dogrulama'
+const KOK = path.join(__dirname, '..')
 
-function servisDurumu () {
+function servisDurumu (ad = SERVIS) {
   return new Promise((resolve) => {
-    execFile('systemctl', ['is-active', SERVIS], { timeout: 5000 }, (err, cikti) => resolve(String(cikti || '').trim() || 'bilinmiyor'))
+    execFile('systemctl', ['is-active', ad], { timeout: 5000 }, (err, cikti) => resolve(String(cikti || '').trim() || 'bilinmiyor'))
+  })
+}
+
+// Doğrulayıcı geçici bir systemd birimi olarak çalışır: panel yeniden başlasa da sürer.
+function dogrulamaBaslat (adet) {
+  return new Promise((resolve, reject) => {
+    execFile('systemd-run', [
+      `--unit=${DOGRULAMA_BIRIM}`, '--collect', '--quiet',
+      `--property=WorkingDirectory=${KOK}`, '--property=TimeoutStopSec=150', '--property=Nice=5',
+      process.execPath, path.join(KOK, 'dogrulama', 'dogrula.js'), '--adet', String(adet)
+    ], { timeout: 15000 }, (err, out, hata) => (err ? reject(new Error(String(hata || err.message))) : resolve()))
   })
 }
 
@@ -225,55 +236,6 @@ panel.txt gizli yukleme anahtarini icerir, kimseyle paylasma.
   ])
 }
 
-// ---------------------------------------------------------------- veri
-
-function durumTopla () {
-  const pcler = []
-  const seedler = new Map()
-  const okunan = new Map()  // pc -> en yeni veri (aynı numara iki yerden gelirse)
-  for (const dizin of [VERI_DIZIN, YUKLEME_DIZIN]) {
-    let dosyalar = []
-    try {
-      dosyalar = fs.readdirSync(dizin).filter((f) => f.endsWith('.txt.json'))
-    } catch { /* dizin yok */ }
-    for (const f of dosyalar) {
-      try {
-        const d = JSON.parse(fs.readFileSync(path.join(dizin, f), 'utf8'))
-        if (!d.kaynak) d.kaynak = 'yerel'
-        const eski = okunan.get(d.pc)
-        if (!eski || d.guncellendi > eski.guncellendi) okunan.set(d.pc, d)
-      } catch { /* bozuk dosya */ }
-    }
-  }
-  for (const d of okunan.values()) {
-    const yas = Date.now() / 1000 - d.guncellendi
-    pcler.push({
-      pc: d.pc,
-      toplam: d.toplam,
-      cekirdek: d.cekirdek,
-      cevrimici: yas < CEVRIMDISI_SN,
-      sonGorulme: d.guncellendi,
-      oturumSn: d.oturumSn,
-      toplamSn: d.toplamSn,
-      hiz: d.hiz,
-      taranan: d.taranan,
-      dilim: d.dilim,
-      sonSeed: d.sonSeed,
-      denenenSeed: d.denenenSeed,
-      uygunSeed: d.uygunSeed,
-      minecraft: d.minecraft,
-      kaynak: d.kaynak
-    })
-    for (const s of d.enIyiler || []) {
-      const eski = seedler.get(s.seed)
-      if (!eski || s.sn < eski.sn) seedler.set(s.seed, { ...s, pc: d.pc })
-    }
-  }
-  pcler.sort((a, b) => a.pc - b.pc)
-  const enIyiler = [...seedler.values()].sort((a, b) => a.sn - b.sn).slice(0, 100)
-  return { zaman: Math.floor(Date.now() / 1000), pcler, enIyiler }
-}
-
 // ---------------------------------------------------------------- sayfalar
 
 const STIL = fs.readFileSync(path.join(__dirname, 'stil.css'), 'utf8')
@@ -309,9 +271,25 @@ function panelSayfasi () {
   <span class="soluk" id="kontrolBilgi">Sadece bu sunucudaki (VDS) taramayı yönetir. Duraklatınca ilerleme kaydedilir, devam edince kaldığı yerden sürer.</span></div>
   <h2>Bilgisayarlar</h2>
   <section id="pcler" class="kartlar"></section>
+  <h2>Gerçek oyunla doğrulama <span class="soluk">(Minecraft 1.21.1 sunucusunda tek tek açıp bakar)</span></h2>
+  <div class="kart">
+    <div class="kontrol">
+      <label>En iyi <select id="dAdet"><option>10</option><option selected>30</option><option>50</option><option>100</option></select> doğrulanmamış seed'i</label>
+      <button id="dBaslat" type="button">Doğrula</button>
+      <button id="dDurdur" type="button" class="ikincil">Durdur</button>
+      <span id="dBilgi" class="soluk"></span>
+    </div>
+    <p class="soluk">Seed başına ~1 dakika. Çalışırken bu sunucudaki avcı duraklatılır, bitince kendiliğinden açılır.
+    <b>Gerçek süre</b> = oyundan ölçülen yol + ağaca yürüme + portal cezaları (eksik obsidyen, çakmak yok, su/gömülü).
+    Görev süreleri (blaze, pearl, ejderha) henüz dahil değil.</p>
+  </div>
+  <div class="tablo-kutu"><table id="dogrulanan"><thead><tr>
+    <th>#</th><th>Seed</th><th>Gerçek</th><th>Yol puanı</th><th>Portal</th><th>Sandık</th><th>Ağaç</th><th>Nether yolu</th><th>Notlar</th>
+  </tr></thead><tbody></tbody></table></div>
+
   <h2>En iyi seed'ler <span class="soluk">(yol puanı = tahmini yol süresi saniye, düşük = iyi; oyunun tamamı değil)</span></h2>
   <div class="tablo-kutu"><table id="seedler"><thead><tr>
-    <th>#</th><th>Seed</th><th>Yol puanı</th><th>Biyom</th><th>Portal</th><th>Nether yolu</th><th>Kale</th><th>PC</th>
+    <th>#</th><th>Seed</th><th>Yol puanı</th><th>Gerçek</th><th>Biyom</th><th>Portal</th><th>Nether yolu</th><th>Kale</th><th>PC</th>
   </tr></thead><tbody></tbody></table></div>
   <p class="soluk" id="guncelleme"></p>
   <h2>Windows bilgisayar ekle</h2>
@@ -425,6 +403,19 @@ async function istek (req, res) {
   if (url.pathname === '/api/durum') {
     const d = durumTopla()
     d.servis = await servisDurumu()
+    const dg = dogrulamaOku()
+    const liste = Object.values(dg.sonuclar)
+    d.dogrulama = {
+      calisiyor: (await servisDurumu(DOGRULAMA_BIRIM)) === 'active',
+      durum: dg.durum,
+      sayi: liste.length,
+      enIyiler: liste.filter((r) => !r.hata).sort((a, b) => a.gercekSure - b.gercekSure).slice(0, 50),
+      hatalar: liste.filter((r) => r.hata).slice(-5)
+    }
+    for (const s of d.enIyiler) {
+      const r = dg.sonuclar[s.seed]
+      if (r) s.dogrulama = r.hata ? { hata: r.hata } : { gercekSure: r.gercekSure, portal: r.portal, notlar: r.notlar }
+    }
     return gonder(res, 200, 'application/json; charset=utf-8', JSON.stringify(d))
   }
   if (url.pathname === '/indir/seed-avcisi-windows.zip') {
@@ -450,7 +441,35 @@ async function istek (req, res) {
     yuklemeKaydet(o)
     return gonder(res, 200, 'text/plain; charset=utf-8', `PC ${o.pc} yüklendi (${o.enIyiler.length} seed)`)
   }
+  if (url.pathname === '/api/dogrulama' && req.method === 'POST') {
+    if (req.headers['x-panel'] !== '1') return gonder(res, 403, 'text/plain; charset=utf-8', 'Yasak')
+    let g
+    try {
+      g = JSON.parse(await govdeOku(req))
+    } catch {
+      return gonder(res, 400, 'text/plain; charset=utf-8', 'Hatalı istek')
+    }
+    const aktif = (await servisDurumu(DOGRULAMA_BIRIM)) === 'active'
+    try {
+      if (g.eylem === 'baslat') {
+        if (aktif) return gonder(res, 409, 'text/plain; charset=utf-8', 'Zaten çalışıyor')
+        const adet = Math.max(1, Math.min(100, Number(g.adet) || 30))
+        await dogrulamaBaslat(adet)
+      } else if (g.eylem === 'durdur') {
+        if (aktif) execFile('systemctl', ['stop', DOGRULAMA_BIRIM], { timeout: 200000 }, () => {})
+      } else {
+        return gonder(res, 400, 'text/plain; charset=utf-8', 'Hatalı eylem')
+      }
+    } catch (err) {
+      console.error(err)
+      return gonder(res, 500, 'text/plain; charset=utf-8', 'Başlatılamadı: ' + err.message.slice(0, 200))
+    }
+    return gonder(res, 200, 'text/plain; charset=utf-8', 'tamam')
+  }
   if (url.pathname === '/api/tarama' && req.method === 'POST') {
+    if ((await servisDurumu(DOGRULAMA_BIRIM)) === 'active') {
+      return gonder(res, 409, 'application/json; charset=utf-8', JSON.stringify({ hata: 'Doğrulama sürerken avcı otomatik yönetiliyor' }))
+    }
     // Çerez SameSite=Strict; ayrıca özel başlık şart (başka siteden form gönderilemez).
     if (req.headers['x-panel'] !== '1') return gonder(res, 403, 'text/plain; charset=utf-8', 'Yasak')
     let eylem = ''

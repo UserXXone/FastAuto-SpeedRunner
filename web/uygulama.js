@@ -77,8 +77,68 @@ $('#elleDosya') && $('#elleDosya').addEventListener('change', async (e) => {
   e.target.value = ''
 })
 
+function seedDugmesi (seed) {
+  const b = el('button', 'seed', seed)
+  b.title = 'Kopyalamak için tıkla'
+  b.addEventListener('click', async () => {
+    try {
+      await navigator.clipboard.writeText(seed)
+      b.classList.add('kopyalandi'); b.textContent = 'kopyalandı ✓'
+      setTimeout(() => { b.textContent = seed; b.classList.remove('kopyalandi') }, 1200)
+    } catch { /* pano izni yok */ }
+  })
+  return b
+}
+
+function portalYazi (p) {
+  if (!p) return '—'
+  const c = p.cerceve
+  const eksik = c ? c.eksik : '?'
+  return (p.yakilabilir ? 'tamamlanır' : `${eksik} eksik`) + (p.ates ? ', ateş ✓' : ', ateş yok') + (p.suda ? ', suda' : '') + (p.gomulu ? ', gömülü' : '')
+}
+
+function sandikYazi (s) {
+  if (!s) return '—'
+  const onemli = ['obsidian', 'flint_and_steel', 'fire_charge', 'gold_ingot', 'iron_nugget', 'flint']
+  const k = Object.entries(s).filter(([a]) => onemli.includes(a)).map(([a, n]) => `${a.replace('_and_', '&').replace(/_/g, ' ')} ${n}`)
+  return k.length ? k.join(', ') : 'işe yarar yok'
+}
+
+async function dogrulamaIstek (govde) {
+  const r = await fetch('/api/dogrulama', { method: 'POST', headers: { 'X-Panel': '1', 'Content-Type': 'application/json' }, body: JSON.stringify(govde) })
+  $('#dBilgi').textContent = r.ok ? 'İstek gönderildi…' : await r.text()
+  setTimeout(yenile, 1500)
+}
+$('#dBaslat') && $('#dBaslat').addEventListener('click', () => dogrulamaIstek({ eylem: 'baslat', adet: Number($('#dAdet').value) }))
+$('#dDurdur') && $('#dDurdur').addEventListener('click', () => dogrulamaIstek({ eylem: 'durdur' }))
+
+function dogrulamaCiz (dg) {
+  if (!dg || !$('#dogrulanan')) return
+  const du = dg.durum
+  $('#dBaslat').disabled = dg.calisiyor
+  $('#dDurdur').disabled = !dg.calisiyor
+  $('#duraklat').disabled = dg.calisiyor
+  let bilgi = `${dg.sayi} seed doğrulandı.`
+  if (dg.calisiyor && du) bilgi = `Çalışıyor: ${du.biten}/${du.toplam} — ${du.simdiki || ''} (${du.asama})`
+  else if (du && du.asama === 'durduruldu') bilgi += ' Son çalışma durduruldu.'
+  $('#dBilgi').textContent = bilgi
+  const satirlar = dg.enIyiler.map((r, i) => {
+    const tr = el('tr', i < 3 ? 'ilk' : '')
+    const td = (x, c) => { const t = el('td', c || null); typeof x === 'string' ? (t.textContent = x) : t.append(x); return t }
+    tr.append(td(`${i + 1}.`, 'sira'), td(seedDugmesi(r.seed)), td(`${r.gercekSure} sn`, 'vurgu'),
+      td(r.yolPuani == null ? '—' : String(r.yolPuani)), td(portalYazi(r.portal)), td(sandikYazi(r.portal && r.portal.sandik)),
+      td(r.agac.enYakin == null ? 'yok' : `${r.agac.enYakin} blok`), td(`${r.netherYol} blok`), td((r.notlar || []).join('; '), 'not'))
+    return tr
+  })
+  if (!satirlar.length) {
+    const tr = el('tr'); const t = el('td', 'soluk', 'Henüz doğrulanan seed yok. “Doğrula”ya bas.'); t.colSpan = 9; tr.append(t); satirlar.push(tr)
+  }
+  $('#dogrulanan tbody').replaceChildren(...satirlar)
+}
+
 function ciz (d) {
   kontrolCiz(d.servis)
+  dogrulamaCiz(d.dogrulama)
   const aktif = d.pcler.filter((p) => p.cevrimici)
   const toplamHiz = aktif.reduce((s, p) => s + p.hiz, 0)
   const toplamTaranan = d.pcler.reduce((s, p) => s + p.taranan, 0)
@@ -130,12 +190,14 @@ function ciz (d) {
     })
     const td = (x, c) => { const t = el('td', c || null); typeof x === 'string' ? (t.textContent = x) : t.append(x); return t }
     const portal = Math.round(Math.hypot(s.spawn[0] - s.portal[0], s.spawn[1] - s.portal[1]))
-    tr.append(td(`${i + 1}.`, 'sira'), td(seedBtn), td(s.sn.toFixed(1)), td(s.biyom), td(`${portal} blok`),
+    const dg = s.dogrulama
+    const gercek = !dg ? '—' : dg.hata ? 'hata' : `${dg.gercekSure}`
+    tr.append(td(`${i + 1}.`, 'sira'), td(seedBtn), td(s.sn.toFixed(1)), td(gercek, dg && !dg.hata ? 'vurgu' : ''), td(s.biyom), td(`${portal} blok`),
       td(`${s.nether} blok`), td(`${s.kale[0]}, ${s.kale[1]}`), td(String(s.pc)))
     return tr
   }))
   if (!d.enIyiler.length) {
-    const tr = el('tr'); const t = el('td', 'soluk', 'Henüz seed yok.'); t.colSpan = 8; tr.append(t)
+    const tr = el('tr'); const t = el('td', 'soluk', 'Henüz seed yok.'); t.colSpan = 9; tr.append(t)
     $('#seedler tbody').replaceChildren(tr)
   }
   $('#guncelleme').textContent = `Son güncelleme: ${new Date(d.zaman * 1000).toLocaleTimeString('tr-TR')} — 5 saniyede bir yenilenir.`
