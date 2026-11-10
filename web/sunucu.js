@@ -24,7 +24,7 @@ const AYAR = path.join(AYAR_DIZIN, 'ayar.json')
 const { tanitimSayfasi } = require('./tanitim-sayfa')
 const { VERI_DIZIN, YUKLEME_DIZIN, durumTopla, dogrulamaOku, tumSeedler, guncelSonuc, jsonOku } = require('./veri')
 const DAGITIM_DIZIN = path.join(VERI_DIZIN, 'dagitim')
-const PANEL_URL = process.env.SEED_PANEL_URL || 'https://seed.zeax.dev'
+const PANEL_URL = process.env.SEED_PANEL_URL || 'https://okul.zeax.dev'
 const MINECRAFT = '1.21.1'
 const OTURUM_GUN = 30
 
