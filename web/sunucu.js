@@ -21,6 +21,7 @@ const PORT = Number(process.env.SEED_PANEL_PORT || 8790)
 const HOST = '127.0.0.1'
 const AYAR_DIZIN = process.env.SEED_PANEL_AYAR || '/root/.config/fastauto-seed'
 const AYAR = path.join(AYAR_DIZIN, 'ayar.json')
+const { tanitimSayfasi } = require('./tanitim-sayfa')
 const { VERI_DIZIN, YUKLEME_DIZIN, durumTopla, dogrulamaOku, tumSeedler, guncelSonuc, jsonOku } = require('./veri')
 const DAGITIM_DIZIN = path.join(VERI_DIZIN, 'dagitim')
 const PANEL_URL = process.env.SEED_PANEL_URL || 'https://seed.zeax.dev'
@@ -257,6 +258,8 @@ panel.txt gizli yukleme anahtarini icerir, kimseyle paylasma.
 
 const STIL = fs.readFileSync(path.join(__dirname, 'stil.css'), 'utf8')
 const UYGULAMA = fs.readFileSync(path.join(__dirname, 'uygulama.js'), 'utf8')
+const TANITIM_STIL = fs.readFileSync(path.join(__dirname, 'tanitim.css'), 'utf8')
+const TANITIM_JS = fs.readFileSync(path.join(__dirname, 'tanitim.js'), 'utf8')
 
 function sayfa (baslik, govde) {
   return `<!doctype html><html lang="tr"><head><meta charset="utf-8">
@@ -265,17 +268,9 @@ function sayfa (baslik, govde) {
 <title>${baslik}</title><link rel="stylesheet" href="/stil.css"></head><body>${govde}</body></html>`
 }
 
+// Giriş yapılmamış ziyaretçi Okul Zili tanıtım sayfasını görür; kod penceresi gizli düğmeyle açılır.
 function girisSayfasi (mesaj) {
-  return sayfa('Seed Avcısı', `
-<main class="giris">
-  <h1>Seed Avcısı</h1>
-  <p class="soluk">Devam etmek için gizli kodu gir.</p>
-  <form method="post" action="/giris">
-    <input name="kod" type="password" autocomplete="current-password" placeholder="XXXX-XXXX-XXXX" autofocus required>
-    <button type="submit">Giriş</button>
-  </form>
-  ${mesaj ? `<p class="hata">${mesaj}</p>` : ''}
-</main>`)
+  return tanitimSayfasi(mesaj)
 }
 
 function panelSayfasi () {
@@ -376,6 +371,8 @@ async function istek (req, res) {
   const girisli = oturumGecerli(ayar, req)
 
   if (url.pathname === '/stil.css') return gonder(res, 200, 'text/css; charset=utf-8', STIL)
+  if (url.pathname === '/tanitim.css') return gonder(res, 200, 'text/css; charset=utf-8', TANITIM_STIL)
+  if (url.pathname === '/tanitim.js') return gonder(res, 200, 'text/javascript; charset=utf-8', TANITIM_JS)
 
   if (url.pathname === '/giris' && req.method === 'POST') {
     const ip = istemciIp(req)
