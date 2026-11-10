@@ -6,7 +6,7 @@ const path = require("path");
 const mineflayer = require("mineflayer");
 const { pathfinder } = require("mineflayer-pathfinder");
 
-const DEFAULT_VERSION = "26.1"; // mineflayer'ın desteklediği en yeni sürüm
+const DEFAULT_VERSION = "26.1"; // harita (elmas) modu için; Nether koşusu 1.21.1 kullanır
 
 const HELP = `
 FastAuto SpeedRunner — Minecraft Java elmas speedrun botu
@@ -25,6 +25,15 @@ Koşu seçenekleri (kos):
   --chat               Aşamaları oyun içi chate de yazsın
   --bekle <saniye>     Bağlandıktan sonra bu kadar bekleyip başlasın
   --version <sürüm>    Minecraft sürümü (varsayılan: otomatik algıla)
+
+Nether koşusu (nether) — Minecraft 1.21.1, sunucuyu kendi açar:
+  --seed <seed>        Panelde görünen bir seed (yapı konumları oradan okunur)
+  --portal <x,z>       Yıkık portalın yeri (seed panelde yoksa)
+  --basla portal       TEST: alet aşamasını atla, portalın yanında başla
+  --izle <saniye>      Koşu bitince sunucuyu bu kadar açık tut
+  --tut                Koşudan sonra dünyayı silme (kosu/dunya)
+  --host/--port        Sunucu açma, var olan 1.21.1 sunucusuna bağlan
+  --chat, --bekle      Koşu seçenekleriyle aynı
 
 Harita seçenekleri (harita):
   --seed <seed>        Dünya seed'i (zorunlu)
@@ -71,6 +80,7 @@ async function kos(args) {
   bot.on("death", () => console.log("☠️  Bot öldü!"));
 
   bot.once("spawn", async () => {
+    require("./dataFix").fixToolData(bot.version);
     console.log(`Bağlandı (Minecraft ${bot.version}). Koşu başlıyor!`);
     try {
       await run(bot, {
@@ -122,10 +132,17 @@ async function main() {
   if (args.help || cmd === "yardim" || cmd === "help") return console.log(HELP);
   if (cmd === "kos") return kos(args);
   if (cmd === "harita") return harita(args);
+  if (cmd === "nether") return require("./kosu").netherKosu(args);
   console.log(HELP);
 }
 
-main().catch((err) => {
-  console.error("❌", err.message);
-  process.exit(1);
-});
+main().then(
+  () => {
+    // Nether koşusu bitince açık kalan bağlantı/sayaç yüzünden asılı kalmasın.
+    if ((process.argv[2] || "") === "nether") process.exit(0);
+  },
+  (err) => {
+    console.error("❌", err.message);
+    process.exit(1);
+  },
+);

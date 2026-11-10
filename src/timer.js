@@ -18,6 +18,7 @@ class Timer {
     this.last = now;
     this.splits.push(s);
     console.log(`⏱  ${fmt(s.total)}  (+${fmt(s.segment)})  ${name}`);
+    if (this.onSplit) this.onSplit(s, this.splits);
     return s;
   }
 

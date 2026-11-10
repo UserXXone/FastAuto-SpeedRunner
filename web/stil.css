@@ -54,3 +54,9 @@ td.vurgu { color: var(--elmas); font-weight: 600; }
 td.not { white-space: normal; min-width: 220px; color: var(--soluk); font-size: 13px; }
 .kontrol button.ikincil { background: var(--soluk); }
 .kontrol select { font: inherit; padding: 6px; border-radius: 6px; border: 1px solid var(--cizgi); background: var(--kart); color: var(--yazi); }
+button.kos { font: inherit; padding: 3px 12px; border: 0; border-radius: 6px; background: var(--vurgu); color: #fff; font-weight: 600; cursor: pointer; }
+button.kos:disabled { opacity: .5; cursor: default; }
+dl.asamalar { display: grid; grid-template-columns: auto 1fr; gap: 3px 16px; margin: 10px 0 0; font-size: 14px; font-variant-numeric: tabular-nums; }
+dl.asamalar dt { color: var(--soluk); }
+dl.asamalar dd { margin: 0; }
+td.hata { color: var(--hata); }

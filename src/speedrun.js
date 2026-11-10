@@ -39,6 +39,16 @@ function setupMovements(bot) {
   for (const n of ["diamond_ore", "deepslate_diamond_ore"]) {
     m.blocksCantBreak.add(bot.registry.blocksByName[n].id);
   }
+  // Yol bulucu lavı "kırılabilir blok" sanıp içinden geçmeye çalışıyor: yasakla.
+  m.blocksCantBreak.add(bot.registry.blocksByName.lava.id);
+  // Magma bloğunun üstünde durmak can götürür (yıkık portallarda ve Nether'da çok var).
+  const magma = bot.registry.blocksByName.magma_block;
+  if (magma) {
+    m.exclusionAreasStep.push((block) => {
+      const below = bot.blockAt(block.position.offset(0, -1, 0));
+      return below && below.type === magma.id ? 100 : 0;
+    });
+  }
   // Suyu biraz pahalı say ama çok değil: aşırı pahalıysa yol arama zaman aşımına düşüyor.
   m.liquidCost = 4;
   bot.pathfinder.setMovements(m);
@@ -63,6 +73,26 @@ function airGuard(bot) {
     while (bot.oxygenLevel < 18 && Date.now() - t0 < 15000) await A.sleep(200);
     bot.setControlState("jump", false);
     rescuing = false;
+  });
+}
+
+// Magma bloğunun üstündeyken eğil: eğilen oyuncuya magma zarar vermez.
+// (Yol bulucu magmadan kaçınıyor ama bot bazen üstünde iş yapmak zorunda kalıyor.)
+function magmaGuard(bot) {
+  const magma = bot.registry.blocksByName.magma_block;
+  if (!magma) return;
+  let ours = false; // eğilmeyi biz mi açtık
+  bot.on("physicsTick", () => {
+    if (!bot.entity) return;
+    const below = bot.blockAt(bot.entity.position.offset(0, -0.3, 0));
+    const onMagma = Boolean(below && below.type === magma.id);
+    if (onMagma && !bot.controlState.sneak) {
+      ours = true;
+      bot.setControlState("sneak", true);
+    } else if (!onMagma && ours) {
+      ours = false;
+      bot.setControlState("sneak", false);
+    }
   });
 }
 
@@ -108,6 +138,73 @@ async function mineList(bot, positions, expect, enough) {
   }
 }
 
+const STONE_BLOCKS = ["stone", "deepslate", "cobblestone", "cobbled_deepslate"];
+
+// Plandaki ağaçları kes; yetmezse yakındaki en yakın kütüklere git.
+async function gatherWood(bot, trees, needed) {
+  // Yol bulucu kütükleri kendi kazmasın: ağacın tepesinde doğunca gövdeyi baştan
+  // sona kazarak iniyordu (20 kütük, 1,5 dakika). Kütükleri sadece biz keselim.
+  const cant = bot.pathfinder.movements.blocksCantBreak;
+  const logIds = bot.registry.blocksArray
+    .filter((b) => b.name.endsWith("_log") && !cant.has(b.id))
+    .map((b) => b.id);
+  for (const id of logIds) cant.add(id);
+  try {
+    await gatherWoodInner(bot, trees, needed);
+  } finally {
+    for (const id of logIds) cant.delete(id);
+  }
+}
+
+async function gatherWoodInner(bot, trees, needed) {
+  // Ağacın tepesinde doğduysak plandaki (yerdeki) kütüğe inmek için gövdeyi
+  // baştan sona kazmak yerine, yanımızdaki kütüklerden başla.
+  const first = (trees || [])[0];
+  if (first && bot.entity.position.y - first.y > 6) trees = [];
+  await mineList(
+    bot,
+    trees || [],
+    (b) => b.name.endsWith("_log"),
+    () => A.count(bot, A.isLog) >= needed,
+  );
+  if (A.count(bot, A.isLog) < needed) {
+    const logNames = Object.keys(bot.registry.blocksByName).filter(
+      (n) => n.endsWith("_log") && !n.startsWith("stripped"),
+    );
+    await A.gatherNearest(bot, logNames, A.isLog, needed, { maxDistance: 64 });
+  }
+  if (A.count(bot, A.isLog) < 3) throw new Error("Yeterli ağaç bulunamadı");
+}
+
+async function makeWoodenPickaxe(bot) {
+  await A.ensurePlanks(bot, 4);
+  const table = await A.ensureTable(bot);
+  await A.ensurePlanks(bot, 3);
+  await A.ensureSticks(bot, 6);
+  await A.ensurePlanks(bot, 3);
+  await A.craft(bot, "wooden_pickaxe", 1, table);
+  return table;
+}
+
+// cobbleNeeded kadar taş topla (en az 3), taş kazmayı yap. Masayı döndürür.
+async function makeStonePickaxe(bot, cobbleNeeded) {
+  await A.gatherNearest(bot, STONE_BLOCKS, A.isCobble, cobbleNeeded, {
+    maxDistance: 32,
+  });
+  if (A.count(bot, A.isCobble) < cobbleNeeded) {
+    // Yakında ulaşılabilir taş yoksa biraz aşağı kaz ve tekrar dene.
+    const y = Math.floor(bot.entity.position.y);
+    await A.goto(bot, new GoalY(y - 6));
+    await A.gatherNearest(bot, STONE_BLOCKS, A.isCobble, cobbleNeeded, {
+      maxDistance: 48,
+    });
+  }
+  if (A.count(bot, A.isCobble) < 3) throw new Error("Taş bulunamadı");
+  const table = await A.ensureTable(bot);
+  await A.craft(bot, "stone_pickaxe", 1, table);
+  return table;
+}
+
 async function run(bot, opts = {}) {
   if (opts.delay) {
     console.log(`${opts.delay} saniye sonra başlıyor...`);
@@ -141,53 +238,15 @@ async function run(bot, opts = {}) {
   timer.split("Harita + strateji");
 
   // 2) ODUN
-  await mineList(
-    bot,
-    plan.trees,
-    (b) => b.name.endsWith("_log"),
-    () => A.count(bot, A.isLog) >= LOGS_NEEDED,
-  );
-  if (A.count(bot, A.isLog) < LOGS_NEEDED) {
-    const logNames = Object.keys(bot.registry.blocksByName).filter(
-      (n) => n.endsWith("_log") && !n.startsWith("stripped"),
-    );
-    await A.gatherNearest(bot, logNames, A.isLog, LOGS_NEEDED, {
-      maxDistance: 64,
-    });
-  }
-  if (A.count(bot, A.isLog) < 3) throw new Error("Yeterli ağaç bulunamadı");
+  await gatherWood(bot, plan.trees, LOGS_NEEDED);
   timer.split(`Odun (${A.count(bot, A.isLog)} kütük)`);
 
   // 3) TAHTA KAZMA
-  await A.ensurePlanks(bot, 4);
-  let table = await A.ensureTable(bot);
-  await A.ensurePlanks(bot, 3);
-  await A.ensureSticks(bot, 6);
-  await A.ensurePlanks(bot, 3);
-  await A.craft(bot, "wooden_pickaxe", 1, table);
+  await makeWoodenPickaxe(bot);
   timer.split("Tahta kazma");
 
   // 4) TAŞ KAZMA
-  const stoneBlocks = [
-    "stone",
-    "deepslate",
-    "cobblestone",
-    "cobbled_deepslate",
-  ];
-  await A.gatherNearest(bot, stoneBlocks, A.isCobble, COBBLE_NEEDED, {
-    maxDistance: 32,
-  });
-  if (A.count(bot, A.isCobble) < COBBLE_NEEDED) {
-    // Yakında ulaşılabilir taş yoksa biraz aşağı kaz ve tekrar dene.
-    const y = Math.floor(bot.entity.position.y);
-    await A.goto(bot, new GoalY(y - 6));
-    await A.gatherNearest(bot, stoneBlocks, A.isCobble, COBBLE_NEEDED, {
-      maxDistance: 48,
-    });
-  }
-  if (A.count(bot, A.isCobble) < 3) throw new Error("Taş bulunamadı");
-  table = await A.ensureTable(bot);
-  await A.craft(bot, "stone_pickaxe", 1, table);
+  let table = await makeStonePickaxe(bot, COBBLE_NEEDED);
   timer.split("Taş kazma");
 
   // 5) DEMİR
@@ -213,7 +272,7 @@ async function run(bot, opts = {}) {
 
   // 6) ERİTME
   if (A.count(bot, A.isCobble) < 8) {
-    await A.gatherNearest(bot, stoneBlocks, A.isCobble, 8, { maxDistance: 16 });
+    await A.gatherNearest(bot, STONE_BLOCKS, A.isCobble, 8, { maxDistance: 16 });
   }
   table = await A.ensureTable(bot);
   await A.craft(bot, "furnace", 1, table);
@@ -276,4 +335,13 @@ async function findDiamondsLive(bot, target, say) {
   }
 }
 
-module.exports = { run, setupMovements, waitForChunks };
+module.exports = {
+  run,
+  setupMovements,
+  airGuard,
+  magmaGuard,
+  waitForChunks,
+  gatherWood,
+  makeWoodenPickaxe,
+  makeStonePickaxe,
+};

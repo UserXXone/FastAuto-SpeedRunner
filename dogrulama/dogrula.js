@@ -20,16 +20,17 @@
 
 const fs = require('fs')
 const path = require('path')
-const net = require('net')
 const crypto = require('crypto')
-const { spawn, execFileSync } = require('child_process')
+const { execFileSync } = require('child_process')
 const mineflayer = require('mineflayer')
 const { Vec3 } = require('vec3')
-const { tumSeedler, DOGRULAMA_DIZIN, jsonOku } = require('../web/veri')
+const { tumSeedler, DOGRULAMA_DIZIN, DOGRULAMA_SURUM, guncelSonuc, jsonOku } = require('../web/veri')
+const { planFrame, findRuin, kindAtFor } = require('../src/portal')
+const { fixToolData } = require('../src/dataFix')
 
-const JAR = process.env.MC_SUNUCU_JAR || path.join(__dirname, 'sunucu', 'server-1.21.1.jar')
-const JAR_SHA1 = '59353fb40c36d304f2035d51e7d6e6baa98dc05c'
-const JAR_URL = `https://piston-data.mojang.com/v1/objects/${JAR_SHA1}/server.jar`
+fixToolData('1.21.1')  // taş kazmayla ağlayan obsidyen süresi doğru hesaplansın
+const { Rcon, jarHazirla, sunucuAc, sunucuKapat, zamanAsimi } = require('./sunucu')
+
 const DUNYA = path.join(__dirname, 'dunya')
 const SONUC = path.join(DOGRULAMA_DIZIN, 'sonuclar.json')
 const DURUM = path.join(DOGRULAMA_DIZIN, 'durum.json')
@@ -48,12 +49,6 @@ const NETHER_HIZ = 4.5
 const bekle = (ms) => new Promise((r) => setTimeout(r, ms))
 const uzak = (a, b) => Math.hypot(a[0] - b[0], a[1] - b[1])
 
-function zamanAsimi (soz, ms, ad) {
-  let t
-  return Promise.race([soz, new Promise((_, rej) => { t = setTimeout(() => rej(new Error(`${ad}: zaman aşımı`)), ms) })])
-    .finally(() => clearTimeout(t))
-}
-
 function yazAtomik (yol, veri) {
   fs.mkdirSync(path.dirname(yol), { recursive: true })
   fs.writeFileSync(yol + '.tmp', JSON.stringify(veri, null, 1))
@@ -69,129 +64,10 @@ function log (...a) {
   console.log(new Date().toISOString().slice(11, 19), ...a)
 }
 
-// ---------------------------------------------------------------- RCON
-
-class Rcon {
-  constructor () { this.id = 10; this.bekleyen = new Map(); this.tampon = Buffer.alloc(0) }
-
-  baglan (port, sifre) {
-    return new Promise((resolve, reject) => {
-      this.s = net.createConnection(port, '127.0.0.1')
-      this.s.on('error', reject)
-      this.s.on('data', (d) => this.oku(d))
-      this.s.on('connect', () => {
-        this.bekleyen.set(1, (paket) => (paket.id === -1 ? reject(new Error('RCON şifresi yanlış')) : resolve()))
-        this.gonder(1, 3, sifre)
-      })
-    })
-  }
-
-  gonder (id, tur, govde) {
-    const g = Buffer.from(govde, 'utf8')
-    const b = Buffer.alloc(14 + g.length)
-    b.writeInt32LE(10 + g.length, 0); b.writeInt32LE(id, 4); b.writeInt32LE(tur, 8); g.copy(b, 12)
-    this.s.write(b)
-  }
-
-  oku (d) {
-    this.tampon = Buffer.concat([this.tampon, d])
-    while (this.tampon.length >= 4) {
-      const uz = this.tampon.readInt32LE(0)
-      if (this.tampon.length < uz + 4) break
-      const id = this.tampon.readInt32LE(4)
-      const tur = this.tampon.readInt32LE(8)
-      const govde = this.tampon.subarray(12, uz + 2).toString('utf8')
-      this.tampon = this.tampon.subarray(uz + 4)
-      if (tur === 0 && id === 1) continue  // bazı sürümler auth'tan önce boş paket yollar
-      const cb = this.bekleyen.get(id === -1 ? 1 : id)
-      if (cb) { this.bekleyen.delete(id === -1 ? 1 : id); cb({ id, tur, govde }) }
-    }
-  }
-
-  komut (k, ms = 120e3) {
-    const id = ++this.id
-    const soz = new Promise((resolve) => this.bekleyen.set(id, (p) => resolve(p.govde)))
-    this.gonder(id, 2, k)
-    return zamanAsimi(soz, ms, `rcon "${k}"`)
-  }
-
-  kapat () { try { this.s.destroy() } catch { /* */ } }
-}
-
 // ---------------------------------------------------------------- sunucu
 
-function jarHazirla () {
-  if (fs.existsSync(JAR)) return
-  fs.mkdirSync(path.dirname(JAR), { recursive: true })
-  log('Sunucu dosyası indiriliyor (Mojang)...')
-  execFileSync('curl', ['-fsSL', '-o', JAR + '.tmp', JAR_URL])
-  const sha = crypto.createHash('sha1').update(fs.readFileSync(JAR + '.tmp')).digest('hex')
-  if (sha !== JAR_SHA1) { fs.rmSync(JAR + '.tmp'); throw new Error('İndirilen sunucu dosyasının imzası tutmadı') }
-  fs.renameSync(JAR + '.tmp', JAR)
-}
-
-function portBos (port) {
-  return new Promise((resolve) => {
-    const s = net.createServer().once('error', () => resolve(false)).once('listening', () => s.close(() => resolve(true)))
-    s.listen(port, '0.0.0.0')
-  })
-}
-
-async function sunucuAc (seed, sifre) {
-  for (const p of [PORT, RCON_PORT]) {
-    if (!(await portBos(p))) throw new Error(`port ${p} dolu (başka bir sunucu açık kalmış olabilir)`)
-  }
-  fs.rmSync(DUNYA, { recursive: true, force: true })
-  fs.mkdirSync(DUNYA, { recursive: true })
-  fs.writeFileSync(path.join(DUNYA, 'eula.txt'), 'eula=true\n')
-  fs.writeFileSync(path.join(DUNYA, 'server.properties'), [
-    `level-seed=${seed}`,
-    'online-mode=false',       // sadece 127.0.0.1'de dinliyor, dışarıdan girilemez
-    'server-ip=127.0.0.1',
-    `server-port=${PORT}`,
-    'enable-rcon=true',
-    `rcon.port=${RCON_PORT}`,
-    `rcon.password=${sifre}`,
-    'view-distance=6',
-    'simulation-distance=4',
-    'spawn-protection=0',
-    'difficulty=peaceful',
-    'max-players=2',
-    'motd=FastAuto dogrulama',
-    'sync-chunk-writes=false',
-    'enable-status=false',
-    ''
-  ].join('\n'))
-  const p = spawn('java', [`-Xms256M`, `-Xmx${BELLEK}`, '-XX:+UseSerialGC', '-jar', JAR, 'nogui'], { cwd: DUNYA, stdio: ['pipe', 'pipe', 'pipe'] })
-  const son = []
-  const hazir = new Promise((resolve, reject) => {
-    const satir = (d) => {
-      for (const l of String(d).split('\n')) {
-        if (!l.trim()) continue
-        son.push(l); if (son.length > 30) son.shift()
-        if (/RCON running on/.test(l)) resolve()
-      }
-    }
-    p.stdout.on('data', satir)
-    p.stderr.on('data', satir)
-    p.on('exit', (k) => reject(new Error(`sunucu kapandı (kod ${k}):\n${son.slice(-8).join('\n')}`)))
-  })
-  p.on('error', () => {})
-  aktifSunucu = p
-  await zamanAsimi(hazir, 4 * 60e3, 'sunucu açılışı')
-  return p
-}
-
-async function sunucuKapat (p, rcon) {
-  if (!p || p.exitCode !== null) return
-  const cikti = new Promise((r) => p.once('exit', r))
-  try { if (rcon) await rcon.komut('stop', 10e3) } catch { try { p.stdin.write('stop\n') } catch { /* */ } }
-  try {
-    await zamanAsimi(cikti, 60e3, 'sunucu kapanışı')
-  } catch {
-    p.kill('SIGKILL')
-    await cikti
-  }
+function sunucuBaslat (seed, sifre) {
+  return sunucuAc({ seed, sifre, dizin: DUNYA, port: PORT, rconPort: RCON_PORT, bellek: BELLEK, ozellikler: { motd: 'FastAuto dogrulama' }, acildi: (p) => { aktifSunucu = p } })
 }
 
 // ---------------------------------------------------------------- bot
@@ -219,45 +95,6 @@ function idler (bot, filtre) {
   return Object.values(bot.registry.blocksByName).filter((b) => filtre(b.name)).map((b) => b.id)
 }
 
-// ---------------------------------------------------------------- yıkık portal çerçevesi
-
-// Obsidyenlerden portalın düzlemini ve çerçevesini bulur; eksik blok sayısını tahmin eder.
-// Çerçeve köşeleri sayılmaz (Minecraft köşesiz portalı da yakar). Ağlayan obsidyen işe yaramaz.
-function cerceveAnaliz (obs, aglayan) {
-  const hepsi = [...obs.map((p) => ({ p, iyi: true })), ...aglayan.map((p) => ({ p, iyi: false }))]
-  if (!hepsi.length) return null
-  const gruplar = new Map()
-  for (const b of hepsi) {
-    for (const [eksen, sabit] of [['x', b.p.z], ['z', b.p.x]]) {
-      const k = `${eksen}:${sabit}`
-      if (!gruplar.has(k)) gruplar.set(k, { eksen, sabit, bloklar: [] })
-      gruplar.get(k).bloklar.push(b)
-    }
-  }
-  const g = [...gruplar.values()].sort((a, b) => b.bloklar.length - a.bloklar.length)[0]
-  const u = (p) => (g.eksen === 'x' ? p.x : p.z)
-  const izgara = new Map(g.bloklar.map((b) => [`${u(b.p)},${b.p.y}`, b.iyi]))
-  const us = g.bloklar.map((b) => u(b.p))
-  const ys = g.bloklar.map((b) => b.p.y)
-  let u0 = Math.min(...us); let u1 = Math.max(...us)
-  let y0 = Math.min(...ys); let y1 = Math.max(...ys)
-  // En küçük çalışan çerçeve 4 geniş x 5 yüksek.
-  if (u1 - u0 + 1 < 4) u1 = u0 + 3
-  if (y1 - y0 + 1 < 5) y1 = y0 + 4
-  let cerceve = 0; let var_ = 0
-  for (let a = u0; a <= u1; a++) {
-    for (let y = y0; y <= y1; y++) {
-      const kenar = a === u0 || a === u1 || y === y0 || y === y1
-      const kose = (a === u0 || a === u1) && (y === y0 || y === y1)
-      if (!kenar || kose) continue
-      cerceve++
-      if (izgara.get(`${a},${y}`) === true) var_++
-    }
-  }
-  const orta = g.eksen === 'x' ? [Math.round((u0 + u1) / 2), g.sabit] : [g.sabit, Math.round((u0 + u1) / 2)]
-  return { eksen: g.eksen, genislik: u1 - u0 + 1, yukseklik: y1 - y0 + 1, cerceve, var: var_, eksik: cerceve - var_, y0, y1, u0, u1, sabit: g.sabit, orta }
-}
-
 // ---------------------------------------------------------------- tek seed
 
 function locateAyikla (cevap) {
@@ -282,10 +119,10 @@ async function enYakinYapi (rcon, boyut, yapi, merkez, tahmin) {
 async function seedDogrula (seed, yolPuani, tahmin = {}) {
   const sifre = crypto.randomBytes(12).toString('hex')
   let sunucu = null; let rcon = null; let bot = null
-  const r = { seed, zaman: Math.floor(Date.now() / 1000), yolPuani, notlar: [] }
+  const r = { seed, surum: DOGRULAMA_SURUM, zaman: Math.floor(Date.now() / 1000), yolPuani, notlar: [] }
   try {
     durumYaz({ asama: 'sunucu açılıyor' })
-    sunucu = await sunucuAc(seed, sifre)
+    sunucu = await sunucuBaslat(seed, sifre)
     rcon = new Rcon()
     await rcon.baglan(RCON_PORT, sifre)
     await rcon.komut('gamerule spawnRadius 0')
@@ -325,41 +162,15 @@ async function seedDogrula (seed, yolPuani, tahmin = {}) {
     const lp = await enYakinYapi(rcon, 'overworld', '#minecraft:ruined_portal', r.spawn, tahmin.portal)
     if (!lp) throw new Error('yıkık portal bulunamadı')
     await isinla(bot, rcon, lp.x, 200, lp.z)
-    const merkez = new Vec3(lp.x, 64, lp.z)
-    const yakin = (p) => Math.hypot(p.x - lp.x, p.z - lp.z) <= 32
-    const bul = (filtre) => bot.findBlocks({ point: merkez, matching: idler(bot, filtre), maxDistance: 140, count: 600 }).filter(yakin)
-    const obs = bul((n) => n === 'obsidian')
-    const agl = bul((n) => n === 'crying_obsidian')
-    const cer = cerceveAnaliz(obs, agl)
-    r.portal = {
-      tur: lp.tur,
-      konum: cer ? cer.orta : [lp.x, lp.z],
-      obsidyen: obs.length,
-      aglayan: agl.length,
-      cerceve: cer ? { genislik: cer.genislik, yukseklik: cer.yukseklik, eksik: cer.eksik, y: cer.y0 } : null
-    }
-    if (cer) {
-      // Su içinde mi, gömülü mü?
-      let su = 0; let ust = 0
-      for (let a = cer.u0; a <= cer.u1; a++) {
-        for (let y = cer.y0; y <= cer.y1 + 1; y++) {
-          const p = cer.eksen === 'x' ? new Vec3(a, y, cer.sabit) : new Vec3(cer.sabit, y, a)
-          const bl = bot.blockAt(p)
-          if (bl && (bl.name === 'water' || bl.name === 'seagrass' || bl.name === 'kelp' || bl.name === 'kelp_plant')) su++
-        }
-        const pu = cer.eksen === 'x' ? new Vec3(a, cer.y1 + 2, cer.sabit) : new Vec3(cer.sabit, cer.y1 + 2, a)
-        const bl = bot.blockAt(pu)
-        if (bl && bl.boundingBox === 'block' && !bl.name.includes('leaves')) ust++
-      }
-      r.portal.suda = su >= 3
-      r.portal.gomulu = ust >= Math.ceil((cer.u1 - cer.u0 + 1) / 2)
-    }
+    await zamanAsimi(bot.waitForChunksToLoad(), 60e3, 'chunk yükleme')
+    const yikik = findRuin(bot, lp.x, lp.z, 32, 64)
+    if (!yikik) throw new Error('yıkık portalda obsidyen yok')
+    r.portal = { tur: lp.tur, konum: [lp.x, lp.z], obsidyen: yikik.obsidian.length, aglayan: yikik.crying.length }
 
     // Sandık
-    const sandiklar = bul((n) => n === 'chest')
-    if (sandiklar.length) {
+    if (yikik.chest) {
       durumYaz({ asama: 'portal sandığı' })
-      const s = sandiklar.sort((a, c) => a.distanceTo(merkez) - c.distanceTo(merkez))[0]
+      const s = yikik.chest
       await isinla(bot, rcon, s.x + 0.5, s.y + 1, s.z + 0.5)
       try {
         const pencere = await zamanAsimi(bot.openContainer(bot.blockAt(s)), 15e3, 'sandık açma')
@@ -372,6 +183,37 @@ async function seedDogrula (seed, yolPuani, tahmin = {}) {
       }
     } else {
       r.notlar.push('portal sandığı yok')
+    }
+
+    // Çerçeve: botun koşuda kullandığı planlayıcının aynısı (taş kazmayla geldiğini varsayar).
+    const sandikObs = (r.portal.sandik && r.portal.sandik.obsidian) || 0
+    const plan = planFrame(yikik.obsidian, kindAtFor(bot, ['stone_pickaxe']), sandikObs)
+    if (plan) {
+      const orta = Math.floor(plan.u0 + plan.w / 2)
+      r.portal.konum = plan.axis === 'x' ? [orta, plan.fixed] : [plan.fixed, orta]
+      // eksik: koyulacak obsidyen. kir: kırılacak blok. zor: kırması uzun süren (ağlayan obsidyen). sure: tahmini inşa süresi (sn).
+      // sivi: portalın içindeki lav/su hücresi (bot taşla kapatıp kurutur).
+      r.portal.cerceve = { genislik: plan.w, yukseklik: plan.h, eksik: plan.need, kir: plan.dig.length, zor: plan.hard, sivi: plan.liquid.length, sure: plan.seconds, y: plan.y0 }
+      // Su içinde mi? Yüzeyin ne kadar altında?
+      let su = 0
+      const hucre = (a, y) => (plan.axis === 'x' ? new Vec3(a, y, plan.fixed) : new Vec3(plan.fixed, y, a))
+      for (let a = plan.u0; a < plan.u0 + plan.w; a++) {
+        for (let y = plan.y0; y <= plan.y0 + plan.h; y++) {
+          const bl = bot.blockAt(hucre(a, y))
+          if (bl && (bl.name === 'water' || bl.name === 'seagrass' || bl.name === 'kelp' || bl.name === 'kelp_plant')) su++
+        }
+      }
+      const tepe = plan.y0 + plan.h - 1
+      let yuzey = tepe
+      for (let y = 250; y > tepe; y--) {
+        const bl = bot.blockAt(hucre(orta, y))
+        if (bl && bl.boundingBox === 'block' && !bl.name.includes('leaves') && !bl.name.endsWith('_log')) { yuzey = y; break }
+      }
+      r.portal.suda = su >= 3
+      r.portal.derinlik = yuzey - tepe          // portalın tepesinin üstündeki toprak/taş kalınlığı
+      r.portal.gomulu = r.portal.derinlik >= 3
+    } else {
+      r.portal.cerceve = null
     }
 
     // Nether yapıları ve kale (oyunun kendi /locate'i)
@@ -419,22 +261,32 @@ function puanla (r) {
   // Odun: en yakın ağaca yürüme (yoksa uzun arama)
   if (r.agac.enYakin == null) { ek += 45; n.push('64 blok içinde ağaç yok') } else ek += r.agac.enYakin / OW_HIZ
 
-  // Portal: eksik obsidyen ve ateş kaynağı
+  // Portal: çerçeveyi tamamlama süresi, eksik obsidyen ve ateş kaynağı
   const s = r.portal.sandik || {}
   const sandikObs = s.obsidian || 0
-  const ates = (s.flint_and_steel || 0) + (s.fire_charge || 0) > 0
-  const eksik = r.portal.cerceve ? r.portal.cerceve.eksik : 10
-  const tamamlanir = eksik <= sandikObs
+  const ates = (s.flint_and_steel || 0) + (s.fire_charge || 0) > 0 ||
+    ((s.flint || 0) > 0 && (s.iron_nugget || 0) >= 9)  // çakmaktaşı + 9 demir parçası = çakmak
+  const c = r.portal.cerceve
+  const eksik = c ? c.eksik : 10
+  const tamamlanir = eksik <= sandikObs && !r.portal.suda
   r.portal.ates = ates
   r.portal.yakilabilir = tamamlanir
-  if (!tamamlanir) {
+  if (c) {
+    ek += c.sure
+    if (c.zor > 0) n.push(`çerçevede kırılması gereken ${c.zor} ağlayan obsidyen var (taş kazmayla tanesi ~1 dk)`)
+  }
+  if (eksik > sandikObs) {
     const fark = eksik - sandikObs
     ek += Math.min(150, 60 + fark * 10)
     n.push(`portal ${fark} obsidyen eksik (lav dökmek gerek)`)
   }
-  if (!ates) { ek += 40; n.push('sandıkta çakmak yok (demir + çakmaktaşı gerek)') }
-  if (r.portal.suda) { ek += 15; n.push('portal su içinde') }
-  if (r.portal.gomulu) { ek += 15; n.push('portal gömülü') }
+  if (!ates) { ek += 40; n.push('sandıkta ateş kaynağı yok (demir + çakmaktaşı gerek)') }
+  if (r.portal.suda) { ek += 60; n.push('portal su içinde (bot henüz su altında çalışamıyor)') }
+  if (r.portal.gomulu) {
+    const d = r.portal.derinlik || 0
+    ek += Math.max(15, Math.round(d * 0.7))
+    n.push(d >= 12 ? `portal yeraltında (${d} blok aşağıda)` : 'portal gömülü')
+  }
 
   r.cezaSn = Math.round(ek)
   r.gercekSure = Math.round((r.portalYol / OW_HIZ + r.netherYol / NETHER_HIZ + ek) * 10) / 10
@@ -482,12 +334,12 @@ async function main () {
   const bilgi = new Map(liste.map((s) => [s.seed, s]))
   let hedef = arg.seedler.length
     ? arg.seedler
-    : liste.filter((s) => arg.yeniden || !sonuclar[s.seed]).slice(0, arg.adet).map((s) => s.seed)
+    : liste.filter((s) => arg.yeniden || !guncelSonuc(sonuclar[s.seed])).slice(0, arg.adet).map((s) => s.seed)
   hedef = hedef.filter((s) => /^-?\d{1,20}$/.test(s))
   durumYaz({ toplam: hedef.length, biten: 0 })
   if (!hedef.length) { log('Doğrulanacak yeni seed yok.'); return }
 
-  jarHazirla()
+  jarHazirla(log)
   avciDurdur()
   for (const seed of hedef) {
     if (durduruldu) break
@@ -495,7 +347,7 @@ async function main () {
     log(`[${durum.biten + 1}/${hedef.length}] ${seed}`)
     const t = bilgi.get(seed) || {}
     const r = await zamanAsimi(seedDogrula(seed, t.sn ?? null, t), SEED_SURE, 'seed doğrulama')
-      .catch((e) => ({ seed, zaman: Math.floor(Date.now() / 1000), yolPuani: t.sn ?? null, hata: e.message, notlar: [] }))
+      .catch((e) => ({ seed, surum: DOGRULAMA_SURUM, zaman: Math.floor(Date.now() / 1000), yolPuani: t.sn ?? null, hata: e.message, notlar: [] }))
     const guncel = jsonOku(SONUC, {})
     guncel[seed] = r
     yazAtomik(SONUC, guncel)

@@ -105,6 +105,39 @@ Elmas     : 131 -58 -5 (4 blokluk damar)
 npm start -- --plan harita/seed-12345.json
 ```
 
+## 3) Nether koşusu (Faz 3, yapım aşamasında)
+
+Tam oyunu bitirme yolundaki ilk bölüm: bot doğma noktasından başlar ve **Nether'a girer**.
+
+```
+Odun → Tahta kazma → Taş kazma + kılıç → Yıkık portal → Sandık → Çerçeveyi tamamla → Yak → NETHER
+```
+
+Bu mod **Minecraft 1.21.1** kullanır (seed avcısıyla aynı sürüm) ve **Java 21** ister. Sunucuyu kendi açar; sunucu sadece `127.0.0.1`'de dinler.
+
+```bash
+npm run nether -- --seed -2192408593595833481
+```
+
+- Seed panelde (seed.zeax.dev) görünen bir seed olmalı. Yıkık portalın, fortress'in ve bastion'ın yeri oradan okunur. Panelde olmayan bir seed için `--portal x,z` ver.
+- Bot portalı **sandıktaki obsidyenle** tamamlar ve sandıktaki çakmak ya da ateş topuyla yakar. Çakmak yoksa çakmaktaşı + 9 demir parçasından kendi yapar. Sandığı yetmeyen seed'lerde durur (lav dökerek obsidyen yapma henüz yok). Panelde **Portal** sütununda "tamamlanır" ya da "tamam" yazan seed'leri seç.
+- Çerçevenin içinde kalan ot, sarmaşık, toprak gibi blokları temizler. Çerçevede ağlayan obsidyen varsa kırar, ama taş kazmayla tanesi yaklaşık 1 dakika sürer.
+- Sandıkta altın zırh varsa giyer (Nether'da piglinler saldırmasın diye).
+- Koşu sonuçları `kosu/veri/kosular.json` dosyasına yazılır.
+
+| Seçenek | Açıklama |
+|---------|----------|
+| `--seed <seed>` | Koşulacak seed |
+| `--portal <x,z>` | Yıkık portalın yeri (seed panelde yoksa) |
+| `--izle <sn>` | Koşu bitince sunucuyu bu kadar açık tut |
+| `--tut` | Koşudan sonra dünyayı silme (`kosu/dunya`) |
+| `--host`, `--port` | Sunucu açma, var olan bir 1.21.1 sunucusuna bağlan |
+| `--basla portal` | Test için: alet aşamasını atlar, botu portalın yanına ışınlar ve alet verir. Gerçek koşu sayılmaz. |
+
+Çalışırken bu makinedeki seed avcısı duraklatılır, bitince geri açılır. Seed doğrulaması sürüyorsa koşu başlamaz (ikisine birden RAM yetmez).
+
+**Oyundan izlemek için** (bot uzak bir sunucuda koşuyorsa): kendi bilgisayarında `ssh -L 25565:localhost:25565 kullanici@sunucu` ile tünel aç, Minecraft 1.21.1'de **Multiplayer → Direct Connection → `localhost`** ile gir. Koşuya `--bekle 30` eklersen girmen için 30 saniye bekler.
+
 ## Tüm seçenekler
 
 ```bash
@@ -128,6 +161,9 @@ npm start -- --help
 - `src/actions.js`: Kazma, drop toplama, crafting, masa ve fırın koyma, eritme.
 - `src/speedrun.js`: Aşamalar ve zamanlayıcı. Plan tutmazsa bot canlı aramaya geçer. Görünürde elmas yoksa derine inip keşfe çıkar.
 - `src/harita.js`: Seed modu. Geçici sunucuyu açar ve kaşif botu `tp` ile gezdirip tarar.
+- `src/portal.js`: Yıkık portal. Yapıyı bulur, en ucuz çerçeveyi planlar (kaç obsidyen koyulacak, ne kırılacak), obsidyenleri koyar, yakar ve içine girer. Aynı planlayıcıyı seed doğrulayıcı da kullanır.
+- `src/nether.js`: Nether koşusunun aşamaları.
+- `src/kosu.js`: Nether koşusu için sunucuyu açar, botu sokar, sonucu kaydeder.
 
 ## Bilinen sınırlar
 

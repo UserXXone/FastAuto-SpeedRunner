@@ -10,6 +10,10 @@ const VERI_DIZIN = process.env.SEED_VERI_DIZIN || path.join(__dirname, '..', 'se
 const YUKLEME_DIZIN = path.join(VERI_DIZIN, 'yuklenen')
 const DOGRULAMA_DIZIN = process.env.SEED_DOGRULAMA_DIZIN || path.join(__dirname, '..', 'dogrulama', 'veri')
 const CEVRIMDISI_SN = 90  // Windows PC'ler 30 sn'de bir yükler
+// Doğrulama ölçümleri değişince artar; eski sürümle ölçülen seed'ler yeniden doğrulanır.
+// 2: çerçeve botun planlayıcısıyla ölçülüyor (kırılacak ağlayan obsidyen dahil).
+const DOGRULAMA_SURUM = 2
+const guncelSonuc = (r) => Boolean(r && (r.surum || 1) >= DOGRULAMA_SURUM)
 
 function jsonOku (yol, varsayilan) {
   try {
@@ -102,4 +106,4 @@ function tumSeedler () {
   return [...m.values()].sort((a, b) => a.sn - b.sn)
 }
 
-module.exports = { tumSeedler, VERI_DIZIN, YUKLEME_DIZIN, DOGRULAMA_DIZIN, CEVRIMDISI_SN, durumTopla, dogrulamaOku, jsonOku }
+module.exports = { tumSeedler, DOGRULAMA_SURUM, guncelSonuc, VERI_DIZIN, YUKLEME_DIZIN, DOGRULAMA_DIZIN, CEVRIMDISI_SN, durumTopla, dogrulamaOku, jsonOku }

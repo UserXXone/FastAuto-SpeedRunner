@@ -21,7 +21,7 @@ const PORT = Number(process.env.SEED_PANEL_PORT || 8790)
 const HOST = '127.0.0.1'
 const AYAR_DIZIN = process.env.SEED_PANEL_AYAR || '/root/.config/fastauto-seed'
 const AYAR = path.join(AYAR_DIZIN, 'ayar.json')
-const { VERI_DIZIN, YUKLEME_DIZIN, durumTopla, dogrulamaOku, tumSeedler } = require('./veri')
+const { VERI_DIZIN, YUKLEME_DIZIN, durumTopla, dogrulamaOku, tumSeedler, guncelSonuc, jsonOku } = require('./veri')
 const DAGITIM_DIZIN = path.join(VERI_DIZIN, 'dagitim')
 const PANEL_URL = process.env.SEED_PANEL_URL || 'https://seed.zeax.dev'
 const MINECRAFT = '1.21.1'
@@ -100,12 +100,29 @@ function hataKaydet (ip) {
 
 const SERVIS = 'seed-avci'
 const DOGRULAMA_BIRIM = 'seed-dogrulama'
+const KOSU_BIRIM = 'seed-kosu'
 const KOK = path.join(__dirname, '..')
 
 function servisDurumu (ad = SERVIS) {
   return new Promise((resolve) => {
     execFile('systemctl', ['is-active', ad], { timeout: 5000 }, (err, cikti) => resolve(String(cikti || '').trim() || 'bilinmiyor'))
   })
+}
+
+// Bot koşusu da geçici bir systemd birimi. Durdurulunca (SIGTERM) sunucusunu kapatır.
+function kosuBaslat (seed) {
+  return new Promise((resolve, reject) => {
+    execFile('systemd-run', [
+      `--unit=${KOSU_BIRIM}`, '--collect', '--quiet',
+      `--property=WorkingDirectory=${KOK}`, '--property=TimeoutStopSec=30',
+      process.execPath, path.join(KOK, 'src', 'index.js'), 'nether', '--seed', seed
+    ], { timeout: 15000 }, (err, out, hata) => (err ? reject(new Error(String(hata || err.message))) : resolve()))
+  })
+}
+
+function kosuOku () {
+  const dizin = path.join(KOK, 'kosu', 'veri')
+  return { durum: jsonOku(path.join(dizin, 'durum.json'), null), kosular: jsonOku(path.join(dizin, 'kosular.json'), []) }
 }
 
 // Doğrulayıcı geçici bir systemd birimi olarak çalışır: panel yeniden başlasa da sürer.
@@ -280,11 +297,25 @@ function panelSayfasi () {
       <span id="dBilgi" class="soluk"></span>
     </div>
     <p class="soluk">Seed başına ~40 sn (100 seed ≈ 1 saat, 1000 seed ≈ 11 saat). Çalışırken bu sunucudaki avcı duraklatılır, bitince kendiliğinden açılır.
-    <b>Gerçek süre</b> = oyundan ölçülen yol + ağaca yürüme + portal cezaları (eksik obsidyen, çakmak yok, su/gömülü).
-    Görev süreleri (blaze, pearl, ejderha) henüz dahil değil.</p>
+    <b>Gerçek süre</b> = oyundan ölçülen yol + ağaca yürüme + çerçeveyi tamamlama + portal cezaları (sandık yetmiyor, ateş yok, su/gömülü).
+    Çerçevedeki her ağlayan obsidyen ~1 dk ekler. Görev süreleri (blaze, pearl, ejderha) henüz dahil değil.</p>
   </div>
   <div class="tablo-kutu"><table id="dogrulanan"><thead><tr>
-    <th>#</th><th>Seed</th><th>Gerçek</th><th>Yol puanı</th><th>Portal</th><th>Sandık</th><th>Ağaç</th><th>Nether yolu</th><th>Notlar</th>
+    <th>#</th><th>Seed</th><th>Gerçek</th><th>Yol puanı</th><th>Portal</th><th>Sandık</th><th>Ağaç</th><th>Nether yolu</th><th>Bot</th><th>Notlar</th>
+  </tr></thead><tbody></tbody></table></div>
+
+  <h2>Bot koşusu <span class="soluk">(şimdilik: doğma noktasından Nether'a giriş)</span></h2>
+  <div class="kart">
+    <div class="kontrol">
+      <span id="kBilgi">Koşu yok.</span>
+      <button id="kDurdur" type="button" class="ikincil" disabled>Koşuyu durdur</button>
+    </div>
+    <p class="soluk">Yukarıdaki tabloda bir seed'in <b>Koş</b> düğmesine bas. Bot o seed'le bu sunucuda geçici bir dünya açar ve koşar.
+    Düğme sadece portalı sandıkla tamamlanabilen ve yakılabilen seed'lerde çıkar. Koşu sürerken avcı duraklatılır.</p>
+    <div id="kAsamalar"></div>
+  </div>
+  <div class="tablo-kutu"><table id="kosular"><thead><tr>
+    <th>Zaman</th><th>Seed</th><th>Sonuç</th><th>Süre</th><th>Aşamalar</th>
   </tr></thead><tbody></tbody></table></div>
 
   <h2>En iyi seed'ler <span class="soluk">(yol puanı = tahmini yol süresi saniye, düşük = iyi; oyunun tamamı değil)</span></h2>
@@ -404,18 +435,26 @@ async function istek (req, res) {
     const d = durumTopla()
     d.servis = await servisDurumu()
     const dg = dogrulamaOku()
-    const liste = Object.values(dg.sonuclar)
+    const liste = Object.values(dg.sonuclar).filter(guncelSonuc)  // eski ölçümler yeniden doğrulanana kadar sayılmaz
     d.dogrulama = {
       calisiyor: (await servisDurumu(DOGRULAMA_BIRIM)) === 'active',
       durum: dg.durum,
       sayi: liste.length,
-      bekleyen: tumSeedler().filter((x) => !dg.sonuclar[x.seed]).length,
+      bekleyen: tumSeedler().filter((x) => !guncelSonuc(dg.sonuclar[x.seed])).length,
       enIyiler: liste.filter((r) => !r.hata).sort((a, b) => a.gercekSure - b.gercekSure).slice(0, 50),
       hatalar: liste.filter((r) => r.hata).slice(-5)
     }
+    const ks = kosuOku()
+    const kosuAktif = (await servisDurumu(KOSU_BIRIM)) === 'active'
+    d.kosu = {
+      calisiyor: kosuAktif,
+      durum: ks.durum && (kosuAktif || !ks.durum.calisiyor) ? ks.durum : null,  // süreç öldüyse eski "çalışıyor" kaydını gösterme
+      sonlar: ks.kosular.slice(-10).reverse(),
+      zaman: Date.now()
+    }
     for (const s of d.enIyiler) {
       const r = dg.sonuclar[s.seed]
-      if (r) s.dogrulama = r.hata ? { hata: r.hata } : { gercekSure: r.gercekSure, portal: r.portal, notlar: r.notlar }
+      if (guncelSonuc(r)) s.dogrulama = r.hata ? { hata: r.hata } : { gercekSure: r.gercekSure, portal: r.portal, notlar: r.notlar }
     }
     return gonder(res, 200, 'application/json; charset=utf-8', JSON.stringify(d))
   }
@@ -442,6 +481,33 @@ async function istek (req, res) {
     yuklemeKaydet(o)
     return gonder(res, 200, 'text/plain; charset=utf-8', `PC ${o.pc} yüklendi (${o.enIyiler.length} seed)`)
   }
+  if (url.pathname === '/api/kosu' && req.method === 'POST') {
+    if (req.headers['x-panel'] !== '1') return gonder(res, 403, 'text/plain; charset=utf-8', 'Yasak')
+    let g
+    try {
+      g = JSON.parse(await govdeOku(req))
+    } catch {
+      return gonder(res, 400, 'text/plain; charset=utf-8', 'Hatalı istek')
+    }
+    const aktif = (await servisDurumu(KOSU_BIRIM)) === 'active'
+    try {
+      if (g.eylem === 'baslat') {
+        const seed = String(g.seed || '')
+        if (!SEED_RE.test(seed)) return gonder(res, 400, 'text/plain; charset=utf-8', 'Hatalı seed')
+        if (aktif) return gonder(res, 409, 'text/plain; charset=utf-8', 'Zaten bir koşu sürüyor')
+        if ((await servisDurumu(DOGRULAMA_BIRIM)) === 'active') return gonder(res, 409, 'text/plain; charset=utf-8', 'Doğrulama sürüyor; önce onu durdur (ikisine birden RAM yetmez)')
+        await kosuBaslat(seed)
+      } else if (g.eylem === 'durdur') {
+        if (aktif) execFile('systemctl', ['stop', KOSU_BIRIM], { timeout: 60000 }, () => {})
+      } else {
+        return gonder(res, 400, 'text/plain; charset=utf-8', 'Hatalı eylem')
+      }
+    } catch (err) {
+      console.error(err)
+      return gonder(res, 500, 'text/plain; charset=utf-8', 'Başlatılamadı: ' + err.message.slice(0, 200))
+    }
+    return gonder(res, 200, 'text/plain; charset=utf-8', 'tamam')
+  }
   if (url.pathname === '/api/dogrulama' && req.method === 'POST') {
     if (req.headers['x-panel'] !== '1') return gonder(res, 403, 'text/plain; charset=utf-8', 'Yasak')
     let g
@@ -454,6 +520,7 @@ async function istek (req, res) {
     try {
       if (g.eylem === 'baslat') {
         if (aktif) return gonder(res, 409, 'text/plain; charset=utf-8', 'Zaten çalışıyor')
+        if ((await servisDurumu(KOSU_BIRIM)) === 'active') return gonder(res, 409, 'text/plain; charset=utf-8', 'Bot koşusu sürüyor; ikisine birden RAM yetmez')
         const adet = g.adet === 'tumu' ? 'tumu' : Math.max(1, Math.min(100000, Math.floor(Number(g.adet)) || 30))
         await dogrulamaBaslat(adet)
       } else if (g.eylem === 'durdur') {
@@ -468,8 +535,8 @@ async function istek (req, res) {
     return gonder(res, 200, 'text/plain; charset=utf-8', 'tamam')
   }
   if (url.pathname === '/api/tarama' && req.method === 'POST') {
-    if ((await servisDurumu(DOGRULAMA_BIRIM)) === 'active') {
-      return gonder(res, 409, 'application/json; charset=utf-8', JSON.stringify({ hata: 'Doğrulama sürerken avcı otomatik yönetiliyor' }))
+    if ((await servisDurumu(DOGRULAMA_BIRIM)) === 'active' || (await servisDurumu(KOSU_BIRIM)) === 'active') {
+      return gonder(res, 409, 'application/json; charset=utf-8', JSON.stringify({ hata: 'Doğrulama ya da koşu sürerken avcı otomatik yönetiliyor' }))
     }
     // Çerez SameSite=Strict; ayrıca özel başlık şart (başka siteden form gönderilemez).
     if (req.headers['x-panel'] !== '1') return gonder(res, 403, 'text/plain; charset=utf-8', 'Yasak')

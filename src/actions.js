@@ -56,7 +56,17 @@ async function goto(bot, goal, timeoutMs = 30000) {
     return false;
   } finally {
     clearTimeout(timer);
+    // Yol bulucu köprü kurarken eğiliyor ve blok koyamazsa öyle bırakıyor:
+    // eğik bot kenardan inemez, yerdeki eşyayı alamaz.
+    if (bot.controlState.sneak) bot.setControlState("sneak", false);
   }
+}
+
+// Havadayken kazmak 5 kat yavaş (ve mineflayer süreyi baştan öyle hesaplıyor):
+// yere basana kadar kısa bir süre bekle.
+async function waitOnGround(bot, maxMs = 1200) {
+  const t0 = Date.now();
+  while (!bot.entity.onGround && !bot.entity.isInWater && Date.now() - t0 < maxMs) await sleep(25);
 }
 
 async function equipFor(bot, block) {
@@ -64,18 +74,33 @@ async function equipFor(bot, block) {
   if (tool) await bot.equip(tool, "hand");
 }
 
+// Envanterdeki en hızlı kıran aleti bul (doğru alet olmasa da; ör. taş kazmayla
+// ağlayan obsidyen). Dönen: { item, seconds }.
+function fastestTool(bot, block) {
+  let best = { item: null, seconds: block.digTime(null, false, false, false, [], {}) / 1000 };
+  for (const it of bot.inventory.items()) {
+    const seconds = block.digTime(it.type, false, false, false, [], {}) / 1000;
+    if (seconds < best.seconds - 1e-6) best = { item: it, seconds };
+  }
+  return best;
+}
+
 // Yerdeki eşyaları (drop) topla.
 async function collectDrops(bot, near, radius = 4) {
-  // Yol hesaplamak yavaş: eşyaya bakıp düz yürü (gerekirse zıpla).
+  // Yol hesaplamak yavaş: önce eşyaya bakıp düz yürü (takılınca zıpla). Olmazsa
+  // (bot bir çukurda, eşya başka bir çukurda) yol bulucuya bırak.
+  if (bot.controlState.sneak) bot.setControlState("sneak", false);
   await sleep(120);
-  for (let i = 0; i < 3; i++) {
-    const drop = Object.values(bot.entities)
+  const nearestDrop = () =>
+    Object.values(bot.entities)
       .filter((e) => e.name === "item" && e.position.distanceTo(near) <= radius)
       .sort(
         (a, b) =>
           a.position.distanceTo(bot.entity.position) -
           b.position.distanceTo(bot.entity.position),
       )[0];
+  for (let i = 0; i < 3; i++) {
+    const drop = nearestDrop();
     if (!drop) return;
     if (drop.position.distanceTo(bot.entity.position) < 1.2) {
       await sleep(150);
@@ -84,18 +109,20 @@ async function collectDrops(bot, near, radius = 4) {
     const t0 = Date.now();
     bot.setControlState("forward", true);
     while (
-      Date.now() - t0 < 1500 &&
+      Date.now() - t0 < 1200 &&
       bot.entities[drop.id] &&
       drop.position.distanceTo(bot.entity.position) > 0.9
     ) {
       await bot.lookAt(drop.position, true);
-      bot.setControlState(
-        "jump",
-        bot.entity.isCollidedHorizontally && drop.position.y > bot.entity.position.y + 0.5,
-      );
+      bot.setControlState("jump", bot.entity.isCollidedHorizontally);
       await sleep(50);
     }
     bot.clearControlStates();
+    if (bot.entities[drop.id] && drop.position.distanceTo(bot.entity.position) > 1.2) {
+      const p = drop.position;
+      await goto(bot, new GoalNear(p.x, p.y, p.z, 1), 4000);
+      await sleep(150);
+    }
   }
 }
 
@@ -173,7 +200,8 @@ async function approach(bot, pos) {
 }
 
 // Bir bloğa git, en iyi aletle kaz, drop'u topla.
-async function mineBlock(bot, pos, { expect, collect = true } = {}) {
+// force: alet "doğru" olmasa da kır (eşya düşmez; sadece bloğu kaldırmak için).
+async function mineBlock(bot, pos, { expect, collect = true, force = false } = {}) {
   pos = new Vec3(pos.x, pos.y, pos.z);
   let block = bot.blockAt(pos);
   if (!block || block.name === "air" || block.name === "cave_air") return false;
@@ -195,12 +223,16 @@ async function mineBlock(bot, pos, { expect, collect = true } = {}) {
     return false;
   }
 
-  await equipFor(bot, block);
+  if (force) {
+    const { item } = fastestTool(bot, block);
+    if (item) await bot.equip(item, "hand");
+  } else await equipFor(bot, block);
   const held = bot.heldItem ? bot.heldItem.type : null;
-  if (!block.canHarvest(held)) {
+  if (!force && !block.canHarvest(held)) {
     dbg("bu aletle kırılmaz:", block.name, bot.heldItem && bot.heldItem.name);
     return false;
   }
+  await waitOnGround(bot);
   try {
     await bot.dig(block, true);
   } catch (err) {
@@ -252,26 +284,82 @@ async function gatherNearest(
   return count(bot, itemTest) >= needed;
 }
 
+// Sunucudan envanterin gerçek halini iste. Mineflayer tıklamaları tahminle
+// işliyor; tahmin kayarsa (ör. craft sırasında yerden eşya alınınca) craft
+// sessizce boşa çıkıyor. Bu çağrıdan sonra bot.inventory kesin doğrudur.
+async function syncInventory(bot) {
+  if (!bot._syncWindow || bot.currentWindow) return;
+  let timer;
+  try {
+    await Promise.race([
+      bot._syncWindow(bot.inventory),
+      new Promise((resolve) => {
+        timer = setTimeout(resolve, 3000);
+      }),
+    ]);
+  } catch (err) {
+    dbg("envanter eşitlenemedi:", err.message);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+function invDump(bot) {
+  const w = bot.inventory;
+  const slots = w.slots
+    .map((it, i) => (it ? `${i}:${it.name}x${it.count}` : null))
+    .filter(Boolean)
+    .join(" ");
+  return `[${slots}] imleç=${w.selectedItem ? w.selectedItem.name : "-"}`;
+}
+
+// Craft ızgarasında kalan malzemeyi envantere geri döndür.
+async function resetCraftGrid(bot) {
+  try {
+    bot.closeWindow(bot.currentWindow || bot.inventory);
+  } catch (err) {
+    /* pencere zaten kapalı */
+  }
+  await sleep(250);
+  await syncInventory(bot);
+}
+
+// Craft et ve sunucunun gerçekten verdiğini doğrula; vermediyse düzeltip tekrar dene.
 async function craft(bot, name, times = 1, table = null) {
   const id = itemId(bot, name);
+  await syncInventory(bot); // tahmin kaymışsa baştan düzelt
   const before = count(bot, name);
-  for (let attempt = 0; ; attempt++) {
+  let lastErr = null;
+  for (let attempt = 0; attempt < 4; attempt++) {
+    if (attempt > 0) {
+      // Izgarada ya da imleçte kalan eşya envantere dönsün; belki craft olmuştur.
+      await resetCraftGrid(bot);
+      if (count(bot, name) > before) return;
+    }
     const recipes = bot.recipesFor(id, null, 1, table);
-    if (!recipes.length)
-      throw new Error(`Craft edilemiyor: ${name} (malzeme eksik ya da masa yok)`);
+    if (!recipes.length) {
+      if (!lastErr)
+        throw new Error(`Craft edilemiyor: ${name} (malzeme eksik ya da masa yok)`);
+      dbg("tarif yok:", name, invDump(bot));
+      continue;
+    }
     try {
       await bot.craft(recipes[0], times, table);
-      break;
     } catch (err) {
-      // Eşya yeni toplandıysa envanter henüz güncellenmemiş olabilir.
-      if (attempt >= 2) throw new Error(`${name} craft edilemedi: ${err.message}`);
+      lastErr = err;
       dbg("craft tekrar deneniyor:", name, err.message);
-      await sleep(400);
+      continue;
     }
+    await syncInventory(bot);
+    if (count(bot, name) > before) return;
+    // Eşitleme, daha önceki bir tıklamanın cevabıyla erken dönmüş olabilir.
+    await sleep(300);
+    await syncInventory(bot);
+    if (count(bot, name) > before) return;
+    lastErr = new Error("sunucu eşyayı vermedi");
+    dbg("craft tutmadı, tekrar:", name, invDump(bot));
   }
-  // Sunucunun envanter güncellemesini bekle.
-  const t0 = Date.now();
-  while (count(bot, name) <= before && Date.now() - t0 < 2000) await sleep(50);
+  throw new Error(`${name} craft edilemedi: ${lastErr ? lastErr.message : "malzeme eksik"}`);
 }
 
 // Tariflerde tahtalar aynı türden olmalı (ör. kazma için 3 meşe tahtası).
@@ -430,7 +518,14 @@ async function smelt(bot, inputName, amount, fuelTest, fuelAmount) {
 }
 
 module.exports = {
+  dbg,
+  approach,
   sleep,
+  itemId,
+  eyeDistance,
+  equipFor,
+  fastestTool,
+  isAirLike,
   digDown,
   count,
   isLog,
@@ -441,6 +536,7 @@ module.exports = {
   gatherNearest,
   collectDrops,
   craft,
+  syncInventory,
   ensurePlanks,
   ensureSticks,
   ensureTable,

@@ -94,7 +94,9 @@ function portalYazi (p) {
   if (!p) return '—'
   const c = p.cerceve
   const eksik = c ? c.eksik : '?'
-  return (p.yakilabilir ? 'tamamlanır' : `${eksik} eksik`) + (p.ates ? ', ateş ✓' : ', ateş yok') + (p.suda ? ', suda' : '') + (p.gomulu ? ', gömülü' : '')
+  let y = p.yakilabilir ? (c && c.eksik ? `tamamlanır (${c.eksik} koy)` : 'tamam') : `${eksik} eksik`
+  if (c && c.zor) y += `, ${c.zor} ağlayan kır`
+  return y + (p.ates ? ', ateş ✓' : ', ateş yok') + (p.suda ? ', suda' : '') + (p.gomulu ? ', gömülü' : '')
 }
 
 function sandikYazi (s) {
@@ -112,12 +114,65 @@ async function dogrulamaIstek (govde) {
 $('#dBaslat') && $('#dBaslat').addEventListener('click', () => dogrulamaIstek({ eylem: 'baslat', adet: $('#dAdet').value === 'tumu' ? 'tumu' : Number($('#dAdet').value) }))
 $('#dDurdur') && $('#dDurdur').addEventListener('click', () => dogrulamaIstek({ eylem: 'durdur' }))
 
+async function kosuIstek (govde) {
+  const r = await fetch('/api/kosu', { method: 'POST', headers: { 'X-Panel': '1', 'Content-Type': 'application/json' }, body: JSON.stringify(govde) })
+  $('#kBilgi').textContent = r.ok ? 'İstek gönderildi…' : await r.text()
+  setTimeout(yenile, 1500)
+}
+$('#kDurdur') && $('#kDurdur').addEventListener('click', () => kosuIstek({ eylem: 'durdur' }))
+
+const dk = (ms) => { const s = Math.floor(ms / 1000); return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}` }
+let mesgul = false  // koşu ya da doğrulama sürüyor
+
+function kosuCiz (k) {
+  if (!k || !$('#kosular')) return
+  const du = k.durum
+  $('#kDurdur').disabled = !k.calisiyor
+  let bilgi = 'Koşu yok.'
+  if (k.calisiyor && du) {
+    const gecen = du.kosuBaslangic ? ` — ${dk(k.zaman - du.kosuBaslangic)}` : ''
+    bilgi = `Koşuyor: ${du.seed} — ${du.asama}${gecen}`
+  } else if (k.calisiyor) bilgi = 'Koşu başlıyor…'
+  else if (du) bilgi = `Son koşu: ${du.seed} — ${du.asama}`
+  $('#kBilgi').textContent = bilgi
+  const kutu = $('#kAsamalar')
+  kutu.replaceChildren()
+  if (du && (du.asamalar || []).length) {
+    const dl = el('dl', 'asamalar')
+    for (const a of du.asamalar) dl.append(el('dt', null, a.name), el('dd', null, `${dk(a.total)}  (+${dk(a.segment)})`))
+    kutu.append(dl)
+  }
+  if (du && (du.notlar || []).length) kutu.append(el('p', 'soluk', du.notlar.join(' · ')))
+  const satirlar = k.sonlar.map((r) => {
+    const tr = el('tr')
+    const td = (x, c) => { const t = el('td', c || null); typeof x === 'string' ? (t.textContent = x) : t.append(x); return t }
+    const asamalar = (r.asamalar || []).map((a) => `${a.name} ${dk(a.total)}`).join(' → ')
+    tr.append(td(new Date(r.zaman * 1000).toLocaleString('tr-TR')), td(seedDugmesi(r.seed)),
+      td(r.basarili ? '✓ Nether\'a girdi' : `✗ ${r.hata || 'yarıda kaldı'}`, r.basarili ? 'vurgu' : 'hata'),
+      td(r.sureMs ? dk(r.sureMs) : '—'), td(asamalar + (r.basla === 'portal' ? ' (test: portaldan başladı)' : ''), 'not'))
+    return tr
+  })
+  if (!satirlar.length) {
+    const tr = el('tr'); const t = el('td', 'soluk', 'Henüz koşu yok.'); t.colSpan = 5; tr.append(t); satirlar.push(tr)
+  }
+  $('#kosular tbody').replaceChildren(...satirlar)
+}
+
+function kosDugmesi (r) {
+  if (!(r.portal && r.portal.yakilabilir && r.portal.ates)) return '—'
+  const b = el('button', 'kos', 'Koş')
+  b.disabled = mesgul
+  b.title = 'Botu bu seed\'de koştur'
+  b.addEventListener('click', () => { b.disabled = true; kosuIstek({ eylem: 'baslat', seed: r.seed }) })
+  return b
+}
+
 function dogrulamaCiz (dg) {
   if (!dg || !$('#dogrulanan')) return
   const du = dg.durum
-  $('#dBaslat').disabled = dg.calisiyor
+  $('#dBaslat').disabled = mesgul
   $('#dDurdur').disabled = !dg.calisiyor
-  $('#duraklat').disabled = dg.calisiyor
+  $('#duraklat').disabled = mesgul
   let bilgi = `${dg.sayi} seed doğrulandı, ${bin(dg.bekleyen)} seed sırada bekliyor.`
   if (dg.calisiyor && du) bilgi = `Çalışıyor: ${du.biten}/${du.toplam} — ${du.simdiki || ''} (${du.asama})`
   else if (du && du.asama === 'durduruldu') bilgi += ' Son çalışma durduruldu.'
@@ -127,18 +182,20 @@ function dogrulamaCiz (dg) {
     const td = (x, c) => { const t = el('td', c || null); typeof x === 'string' ? (t.textContent = x) : t.append(x); return t }
     tr.append(td(`${i + 1}.`, 'sira'), td(seedDugmesi(r.seed)), td(`${r.gercekSure} sn`, 'vurgu'),
       td(r.yolPuani == null ? '—' : String(r.yolPuani)), td(portalYazi(r.portal)), td(sandikYazi(r.portal && r.portal.sandik)),
-      td(r.agac.enYakin == null ? 'yok' : `${r.agac.enYakin} blok`), td(`${r.netherYol} blok`), td((r.notlar || []).join('; '), 'not'))
+      td(r.agac.enYakin == null ? 'yok' : `${r.agac.enYakin} blok`), td(`${r.netherYol} blok`), td(kosDugmesi(r)), td((r.notlar || []).join('; '), 'not'))
     return tr
   })
   if (!satirlar.length) {
-    const tr = el('tr'); const t = el('td', 'soluk', 'Henüz doğrulanan seed yok. “Doğrula”ya bas.'); t.colSpan = 9; tr.append(t); satirlar.push(tr)
+    const tr = el('tr'); const t = el('td', 'soluk', 'Henüz doğrulanan seed yok. “Doğrula”ya bas.'); t.colSpan = 10; tr.append(t); satirlar.push(tr)
   }
   $('#dogrulanan tbody').replaceChildren(...satirlar)
 }
 
 function ciz (d) {
+  mesgul = Boolean((d.dogrulama && d.dogrulama.calisiyor) || (d.kosu && d.kosu.calisiyor))
   kontrolCiz(d.servis)
   dogrulamaCiz(d.dogrulama)
+  kosuCiz(d.kosu)
   const aktif = d.pcler.filter((p) => p.cevrimici)
   const toplamHiz = aktif.reduce((s, p) => s + p.hiz, 0)
   const toplamTaranan = d.pcler.reduce((s, p) => s + p.taranan, 0)
