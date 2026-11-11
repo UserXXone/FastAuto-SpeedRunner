@@ -403,9 +403,6 @@ async function istek (req, res) {
       hataKaydet(ip)
       return gonder(res, 401, 'text/plain; charset=utf-8', 'Anahtar yanlış')
     }
-    const simdi = Date.now()
-    if (simdi - (sonYukleme.get(ip) || 0) < 3000) return gonder(res, 429, 'text/plain; charset=utf-8', 'Çok sık')
-    sonYukleme.set(ip, simdi)
     let o
     try {
       o = yuklemeTemizle(JSON.parse(await govdeOku(req, 256 * 1024)))
@@ -413,6 +410,12 @@ async function istek (req, res) {
       return gonder(res, 400, 'text/plain; charset=utf-8', 'Hatalı JSON')
     }
     if (!o) return gonder(res, 400, 'text/plain; charset=utf-8', 'Geçersiz veri (sürüm ya da pc numarası)')
+    // Aynı PC'nin art arda yüklemesini sınırla. IP'ye göre değil: okuldaki bütün
+    // bilgisayarlar tek bir çıkış IP'sini paylaşıyor, birbirini engellememeli.
+    const simdi = Date.now()
+    const sinirAnahtar = `${ip}|pc${o.pc}`
+    if (simdi - (sonYukleme.get(sinirAnahtar) || 0) < 3000) return gonder(res, 429, 'text/plain; charset=utf-8', 'Çok sık')
+    sonYukleme.set(sinirAnahtar, simdi)
     yuklemeKaydet(o)
     return gonder(res, 200, 'text/plain; charset=utf-8', 'tamam')
   }
