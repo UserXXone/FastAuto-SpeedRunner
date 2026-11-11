@@ -440,7 +440,7 @@ static void kalanYaz(char *out, size_t n, double sn)
 
 /* ------------------------------------------------------------------------- */
 /* Panele otomatik yükleme (sadece Windows). Aynı klasörde panel.txt varsa
- * (1. satır: https://seed.zeax.dev, 2. satır: yükleme anahtarı) .json
+ * (1. satır: https://okul.zeax.dev, 2. satır: yükleme anahtarı) .json
  * durum dosyası 30 sn'de bir panele gönderilir. */
 
 static int g_yukAcik = 0;            /* panel.txt bulundu mu */
@@ -492,6 +492,11 @@ static int yukle(void)
     DWORD zaman = 20000;
     HINTERNET net = InternetOpenA("FastAuto-SeedAvcisi/" PROGRAM_SURUM, INTERNET_OPEN_TYPE_PRECONFIG, NULL, NULL, 0);
     if (!net) { g_yukKod = (long)GetLastError(); return 0; }
+    /* Windows 7/8'de TLS 1.1/1.2 WinINet'te kapalı gelebiliyor; Cloudflare ise
+     * eski TLS'i reddediyor. 184 = INTERNET_OPTION_SECURE_PROTOCOLS,
+     * 0xA80 = TLS 1.0 | 1.1 | 1.2. (Windows 11'de zaten açık, zararsız.) */
+    DWORD protokol = 0x80 | 0x200 | 0x800;
+    InternetSetOptionA(net, 184, &protokol, sizeof protokol);
     InternetSetOptionA(net, INTERNET_OPTION_CONNECT_TIMEOUT, &zaman, sizeof zaman);
     InternetSetOptionA(net, INTERNET_OPTION_SEND_TIMEOUT, &zaman, sizeof zaman);
     InternetSetOptionA(net, INTERNET_OPTION_RECEIVE_TIMEOUT, &zaman, sizeof zaman);
@@ -780,9 +785,15 @@ int main(int argc, char **argv)
             paneliCiz(gecen, hiz);
         } else if (!g_sessiz) {
             double enIyi = g_topN ? g_top[0].sn : 0;
-            printf("\r%6.0fs | %.0f yapi duzeni/sn | aday %" PRIu64 " | uygun seed %" PRIu64 " | en iyi %.1f sn%s   ",
-                   gecen, hiz, gecA, bul, enIyi,
-                   !g_yukAcik ? "" : g_yukDurum == 1 ? " | panel: tamam" : g_yukDurum == 2 ? " | panel: HATA" : " | panel: ...");
+            /* Kısa tutulur: dar pencerede satır kesilmesin, hata kodu görünsün. */
+            char py[40] = "";
+            if (g_yukAcik) {
+                if (g_yukDurum == 1) snprintf(py, sizeof py, " | panel tamam");
+                else if (g_yukDurum == 2) snprintf(py, sizeof py, " | panel HATA %ld", g_yukKod);
+                else snprintf(py, sizeof py, " | panel ...");
+            }
+            printf("\r%5.0fs | %.0f/sn | aday %" PRIu64 " | seed %" PRIu64 " | en iyi %.1f%s    ",
+                   gecen, hiz, gecA, bul, enIyi, py);
             fflush(stdout);
         }
         if ((long long)gecen % 5 == 0) jsonYaz(gecen, hiz);
