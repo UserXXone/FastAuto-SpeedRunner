@@ -14,6 +14,40 @@ const dbg = (...a) => {
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
+// Elimizdeki eşyayı değiştiren işler (blok koyma, kazma, vurma, yeme) aynı anda
+// çalışınca birbirini bozuyor (kılıç elde blok koymaya, et elde kazmaya çalışmak).
+// Hepsi bu sıradan geçer: biri bitmeden öbürü başlamaz.
+function withHand(bot, fn) {
+  const prev = bot._handQueue || Promise.resolve();
+  const run = prev.then(fn, fn);
+  bot._handQueue = run.catch(() => {});
+  return run;
+}
+
+// Büyülü alet eldeyken (ör. sandıktan çıkan altın kazma) mineflayer'ın kazma
+// süresi hesabı 1.21'de hata veriyor ve hiçbir blok kazılamıyor. Hata olursa
+// büyüyü yok sayarak hesapla (biraz fazla bekleriz, o kadar).
+function safeDigTime(bot) {
+  if (bot._safeDigTime) return;
+  bot._safeDigTime = true;
+  const original = bot.digTime;
+  bot.digTime = (block) => {
+    try {
+      return original(block);
+    } catch (err) {
+      const eye = bot._getBlockAtEyeLevel ? bot._getBlockAtEyeLevel() : null;
+      return block.digTime(
+        bot.heldItem ? bot.heldItem.type : null,
+        bot.game.gameMode === "creative",
+        Boolean(eye && eye.name === "water"),
+        !bot.entity.onGround,
+        [],
+        bot.entity.effects,
+      );
+    }
+  };
+}
+
 function itemId(bot, name) {
   const it = bot.registry.itemsByName[name];
   if (!it) throw new Error(`Bilinmeyen eşya: ${name}`);
@@ -324,9 +358,23 @@ async function resetCraftGrid(bot) {
   await syncInventory(bot);
 }
 
+// Yanımızdaki eşyalar envantere girene kadar bekle. Craft sırasında yerden eşya
+// alınırsa sunucu envanteri baştan yollar, mineflayer'ın tıklama sırası bozulur
+// ve yanlış şey craft edilir (4 tahta yerine 1 tahta koyup düğme yapıyordu).
+async function settleDrops(bot, maxMs = 1500) {
+  const t0 = Date.now();
+  const near = () =>
+    Object.values(bot.entities).some(
+      (e) => e.name === "item" && e.position.distanceTo(bot.entity.position) < 2.6,
+    );
+  while (near() && Date.now() - t0 < maxMs) await sleep(50);
+}
+
 // Craft et ve sunucunun gerçekten verdiğini doğrula; vermediyse düzeltip tekrar dene.
-async function craft(bot, name, times = 1, table = null) {
+// prepare: tekrar denemeden önce malzemeyi yeniden hazırlayan fonksiyon (isteğe bağlı).
+async function craft(bot, name, times = 1, table = null, { prepare = null } = {}) {
   const id = itemId(bot, name);
+  await settleDrops(bot);
   await syncInventory(bot); // tahmin kaymışsa baştan düzelt
   const before = count(bot, name);
   let lastErr = null;
@@ -335,6 +383,8 @@ async function craft(bot, name, times = 1, table = null) {
       // Izgarada ya da imleçte kalan eşya envantere dönsün; belki craft olmuştur.
       await resetCraftGrid(bot);
       if (count(bot, name) > before) return;
+      await settleDrops(bot);
+      if (prepare) await prepare();
     }
     const recipes = bot.recipesFor(id, null, 1, table);
     if (!recipes.length) {
@@ -387,7 +437,7 @@ async function ensurePlanks(bot, needed) {
 async function ensureSticks(bot, needed) {
   while (count(bot, "stick") < needed) {
     await ensurePlanks(bot, 2);
-    await craft(bot, "stick", 1);
+    await craft(bot, "stick", 1, null, { prepare: () => ensurePlanks(bot, 2) });
   }
 }
 
@@ -472,7 +522,7 @@ async function ensureTable(bot) {
   }
   if (count(bot, "crafting_table") === 0) {
     await ensurePlanks(bot, 4);
-    await craft(bot, "crafting_table", 1);
+    await craft(bot, "crafting_table", 1, null, { prepare: () => ensurePlanks(bot, 4) });
   }
   return placeNear(bot, "crafting_table");
 }
@@ -519,6 +569,8 @@ async function smelt(bot, inputName, amount, fuelTest, fuelAmount) {
 
 module.exports = {
   dbg,
+  withHand,
+  safeDigTime,
   approach,
   sleep,
   itemId,

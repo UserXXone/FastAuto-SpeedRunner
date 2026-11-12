@@ -42,13 +42,34 @@ function setupMovements(bot) {
   // Yol bulucu lavı "kırılabilir blok" sanıp içinden geçmeye çalışıyor: yasakla.
   m.blocksCantBreak.add(bot.registry.blocksByName.lava.id);
   // Magma bloğunun üstünde durmak can götürür (yıkık portallarda ve Nether'da çok var).
+  // Lav da "sıvı" sayıldığı için yol bulucu üstünde yüzmeye kalkıyor: ikisini de yasakla.
   const magma = bot.registry.blocksByName.magma_block;
-  if (magma) {
-    m.exclusionAreasStep.push((block) => {
-      const below = bot.blockAt(block.position.offset(0, -1, 0));
-      return below && below.type === magma.id ? 100 : 0;
+  const lava = bot.registry.blocksByName.lava;
+  m.exclusionAreasStep.push((block) => {
+    if (!block || !block.position) return 0;
+    if (block.type === lava.id) return 100;
+    const below = bot.blockAt(block.position.offset(0, -1, 0));
+    if (below && (below.type === lava.id || (magma && below.type === magma.id))) return 100;
+    return 0;
+  });
+  // Son emniyet: hiçbir adım lavın içine ya da üstüne inmesin (aşağı atlama
+  // hamlesi lav gölünün dibini "zemin" sanıyordu).
+  const baseNeighbors = m.getNeighbors.bind(m);
+  m.getNeighbors = (node) =>
+    baseNeighbors(node).filter((n) => {
+      const feet = bot.blockAt(new Vec3(n.x, n.y, n.z));
+      if (feet && feet.type === lava.id) return false;
+      const below = bot.blockAt(new Vec3(n.x, n.y - 1, n.z));
+      if (below && below.type === lava.id) return false;
+      // Lavın hemen yanından yürümek de riskli (itilince içine düşülüyor): pahalı say.
+      for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+        for (const dy of [0, -1]) {
+          const b = bot.blockAt(new Vec3(n.x + dx, n.y + dy, n.z + dz));
+          if (b && b.type === lava.id) n.cost += 6;
+        }
+      }
+      return true;
     });
-  }
   // Suyu biraz pahalı say ama çok değil: aşırı pahalıysa yol arama zaman aşımına düşüyor.
   m.liquidCost = 4;
   bot.pathfinder.setMovements(m);
@@ -93,6 +114,79 @@ function magmaGuard(bot) {
       ours = false;
       bot.setControlState("sneak", false);
     }
+  });
+}
+
+// Lava düştüysek her şeyi bırak, en yakın kuru yere çık. Kaçış sürerken
+// bot.inLavaEscape doğrudur; dövüş döngüleri o sırada kontrolü bırakır.
+function lavaGuard(bot) {
+  const lava = bot.registry.blocksByName.lava;
+  let target = null;
+  const safeSpot = () => {
+    const me = bot.entity.position.floored();
+    let best = null;
+    for (let dx = -5; dx <= 5; dx++)
+      for (let dz = -5; dz <= 5; dz++)
+        for (let dy = -1; dy <= 2; dy++) {
+          const p = me.offset(dx, dy, dz);
+          const floor = bot.blockAt(p.offset(0, -1, 0));
+          const feet = bot.blockAt(p);
+          const head = bot.blockAt(p.offset(0, 1, 0));
+          if (!floor || floor.boundingBox !== "block" || !feet || !head) continue;
+          if (feet.boundingBox !== "empty" || head.boundingBox !== "empty") continue;
+          if (feet.type === lava.id || head.type === lava.id) continue;
+          const d = Math.hypot(dx, dz) + Math.max(0, dy) * 1.5;
+          if (!best || d < best.d) best = { d, p };
+        }
+    return best ? best.p.offset(0.5, 0, 0.5) : null;
+  };
+  bot.on("physicsTick", () => {
+    if (!bot.entity) return;
+    // Fizik motorunun isInLava'sı yanlış alarm veriyor (darbe alınca); bloklara bak.
+    const feet = bot.blockAt(bot.entity.position);
+    const waist = bot.blockAt(bot.entity.position.offset(0, 0.9, 0));
+    const inLava = Boolean((feet && feet.type === lava.id) || (waist && waist.type === lava.id));
+    if (inLava) {
+      if (!bot.inLavaEscape) {
+        bot.inLavaEscape = true;
+        const p = bot.entity.position;
+        const head = bot.blockAt(p.offset(0, 1, 0));
+        console.log(
+          `🌋 Lavdayım, çıkıyorum! konum ${p.x.toFixed(1)}, ${p.y.toFixed(1)}, ${p.z.toFixed(1)} | ayak ${feet && feet.name}, baş ${head && head.name}, fizik ${bot.entity.isInLava}`,
+        );
+        bot.pathfinder.setGoal(null);
+        target = safeSpot();
+      }
+      if (!target || bot.entity.position.distanceTo(target) < 0.5) target = safeSpot();
+      if (target) bot.lookAt(target.offset(0, 1.6, 0), true);
+      bot.setControlState("forward", true);
+      bot.setControlState("jump", true);
+      bot.setControlState("sprint", true);
+      bot.setControlState("sneak", false);
+    } else if (bot.inLavaEscape) {
+      bot.inLavaEscape = false;
+      target = null;
+      bot.clearControlStates();
+    }
+  });
+}
+
+// Ateşin içinde durma: ayağımızdaki ateşi söndür (ateşe vurmak söndürür).
+function fireGuard(bot) {
+  let busy = false;
+  let last = 0;
+  bot.on("physicsTick", () => {
+    if (busy || !bot.entity || Date.now() - last < 150) return;
+    const p = bot.entity.position;
+    const here = [bot.blockAt(p), bot.blockAt(p.offset(0, 1, 0))].find(
+      (b) => b && (b.name === "fire" || b.name === "soul_fire"),
+    );
+    if (!here) return;
+    busy = true;
+    last = Date.now();
+    bot.dig(here, "ignore").catch(() => {}).finally(() => {
+      busy = false;
+    });
   });
 }
 
@@ -217,6 +311,7 @@ async function run(bot, opts = {}) {
     if (opts.chat) bot.chat(msg);
   };
 
+  A.safeDigTime(bot);
   setupMovements(bot);
   airGuard(bot);
 
@@ -340,6 +435,8 @@ module.exports = {
   setupMovements,
   airGuard,
   magmaGuard,
+  lavaGuard,
+  fireGuard,
   waitForChunks,
   gatherWood,
   makeWoodenPickaxe,

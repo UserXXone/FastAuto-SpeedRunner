@@ -90,6 +90,7 @@ function saveResult(r) {
 function connect(host, port, username) {
   const bot = mineflayer.createBot({ host, port, username, version: SURUM, auth: "offline", hideErrors: true });
   bot.loadPlugin(pathfinder);
+  bot.setMaxListeners(60);
   bot.on("error", (e) => console.error("Bağlantı hatası:", e.message));
   const spawned = new Promise((resolve, reject) => {
     bot.once("spawn", resolve);
@@ -125,7 +126,9 @@ function watchHealth(bot) {
 
 async function netherKosu(args) {
   const username = args.username || "Speedrunner";
-  const start = args.basla === "portal" ? "portal" : "bastan";
+  // Test kısayolları: "portal" alet aşamasını atlar; "dokum" ayrıca iki kova ve çakmak verir.
+  const cast = args.basla === "dokum";
+  const start = args.basla === "portal" || cast ? "portal" : "bastan";
   const external = Boolean(args.host);
   if (!external && (!args.seed || args.seed === true))
     throw new Error("--seed vermelisin. Örnek: npm run nether -- --seed 123");
@@ -137,7 +140,7 @@ async function netherKosu(args) {
       (info.kaynak ? ` [${info.kaynak}]` : ""),
   );
 
-  const result = { seed, zaman: Math.floor(Date.now() / 1000), hedef: "nether", basla: start, basarili: false };
+  const result = { seed, zaman: Math.floor(Date.now() / 1000), hedef: args.hedef === "nether" ? "nether" : "blaze", basla: start, basarili: false };
   let server = null;
   let rcon = null;
   let hunterStopped = false;
@@ -209,8 +212,9 @@ async function netherKosu(args) {
       console.log("TEST: portala ışınlanıyor, aletler veriliyor (gerçek koşu değil).");
       const [x, z] = info.portal;
       await rcon.komut(`spreadplayers ${x} ${z} 0 4 false ${username}`);
-      for (const it of ["stone_pickaxe", "stone_sword", "oak_log 4", "cobblestone 12"])
+      for (const it of ["stone_pickaxe", "stone_pickaxe", "stone_pickaxe", "stone_pickaxe", "stone_sword", "oak_log 4", "cobblestone 12", "shield", "cooked_beef 12", "golden_boots"])
         await rcon.komut(`give ${username} ${it}`);
+      if (cast) for (const it of ["bucket 2", "flint_and_steel"]) await rcon.komut(`give ${username} ${it}`);
       await sleep(1500);
     }
 
@@ -218,6 +222,7 @@ async function netherKosu(args) {
     const timer = await Promise.race([
       nether.run(bot, info, {
         start,
+        goal: args.hedef === "nether" ? "nether" : "blaze",
         chat: Boolean(args.chat),
         delay: Number(args.bekle || 0),
         onSplit: (s, all) => { result.asamalar = all; setStatus({ asama: s.name, asamalar: all }); },
@@ -238,6 +243,10 @@ async function netherKosu(args) {
       result.sonKonum = [p.x, p.y, p.z, bot.game && bot.game.dimension];
     }
     saveResult(result);
+    if (rcon && process.env.DEBUG) {
+      // Sunucu ne kadar yavaş çalıştı? (20 TPS = tik başına 50 ms)
+      try { console.log("  · sunucu:", (await rcon.komut("tick query", 5000)).replace(/\n/g, " | ").slice(0, 300)); } catch { /* */ }
+    }
     await cleanup();
   }
 }

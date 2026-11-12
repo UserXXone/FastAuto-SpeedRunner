@@ -90,14 +90,14 @@ function portBos (port) {
   })
 }
 
-// ayar: { seed, dizin, port, rconPort, sifre, bellek = '1G', ozellikler = {} }
+// ayar: { seed, dizin, port, rconPort, sifre, bellek = '1G', ozellikler = {}, koru = false }
 // Dönen: java süreci. Dünya klasörü (dizin) baştan oluşturulur.
 async function sunucuAc (ayar) {
   const { seed, dizin, port, rconPort, sifre, bellek = '1G', ozellikler = {} } = ayar
   for (const p of [port, rconPort]) {
     if (!(await portBos(p))) throw new Error(`port ${p} dolu (başka bir sunucu açık kalmış olabilir)`)
   }
-  fs.rmSync(dizin, { recursive: true, force: true })
+  if (!ayar.koru) fs.rmSync(dizin, { recursive: true, force: true })  // koru: var olan dünyayı aç (inceleme için)
   fs.mkdirSync(dizin, { recursive: true })
   fs.writeFileSync(path.join(dizin, 'eula.txt'), 'eula=true\n')
   const oz = {

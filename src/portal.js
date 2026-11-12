@@ -5,7 +5,7 @@
 
 const { Vec3 } = require("vec3");
 const {
-  goals: { GoalNear, GoalGetToBlock, GoalPlaceBlock },
+  goals: { GoalNear, GoalGetToBlock, GoalPlaceBlock, GoalBlock },
 } = require("mineflayer-pathfinder");
 const A = require("./actions");
 const { clusters } = require("./planner");
@@ -414,23 +414,27 @@ async function dryInterior(bot, plan, say) {
   }
 }
 
-async function buildFrame(bot, plan, say = () => {}) {
+// Çerçeveyi hazırla: engelleri kaldır, içindeki lavı/suyu kurut.
+async function prepareFrame(bot, plan, say = () => {}) {
   const v = (p) => new Vec3(p.x, p.y, p.z);
-
-  // 1) Engelleri kaldır (iç boşluk tamamen boş olmalı).
   for (const p of plan.dig) {
     const b = bot.blockAt(v(p));
     if (!b || PORTAL_EMPTY.has(b.name)) continue;
     const ok = await A.mineBlock(bot, v(p), { collect: false, force: true });
     if (!ok) A.dbg("engel kaldırılamadı:", b.name, v(p).toString());
   }
-
-  // 1b) İç boşlukta lav/su varsa kurut.
   if (plan.liquid.length) await dryInterior(bot, plan, say);
+}
+
+// cells verilirse sadece o hücrelere obsidyen koyar (geri kalanı lavla dökülmüştür).
+async function buildFrame(bot, plan, say = () => {}, cells = null) {
+  const v = (p) => new Vec3(p.x, p.y, p.z);
+  if (!cells) await prepareFrame(bot, plan, say);
+  const toPlace = cells || plan.place;
 
   // 2) Eksik obsidyenleri koy: aşağıdan yukarı, her seferinde komşusu olan bir hücre.
   const forbidden = new Set([...plan.interior, ...plan.place].map((p) => v(p).toString()));
-  const pending = plan.place.map(v).sort((a, b) => a.y - b.y);
+  const pending = toPlace.map(v).sort((a, b) => a.y - b.y);
   let supports = 0;
   while (pending.length) {
     let i = pending.findIndex((p) => solidRefs(bot, p).length > 0);
@@ -442,7 +446,7 @@ async function buildFrame(bot, plan, say = () => {}) {
     const p = pending.splice(i, 1)[0];
     if (!(await placeBlockAt(bot, p, "obsidian")))
       throw new Error(`Obsidyen koyulamadı: ${p}`);
-    say(`  obsidyen kondu (${plan.place.length - pending.length}/${plan.place.length})`);
+    say(`  obsidyen kondu (${toPlace.length - pending.length}/${toPlace.length})`);
   }
 
   // 3) Son kontrol: iç boşlukta bir şey kaldı mı (dökülen blok, yeni büyüyen ot)?
@@ -509,23 +513,31 @@ async function lightPortal(bot, plan) {
 }
 
 // Portalın içine yürü ve boyut değişene kadar bekle.
-async function enterPortal(bot, plan, timeoutMs = 45000) {
+async function enterPortal(bot, plan, timeoutMs = 60000) {
   const from = bot.game.dimension;
   const cells = bottomCells(plan);
   const target = cells[Math.floor((cells.length - 1) / 2)];
   const center = target.offset(0.5, 0, 0.5);
   const t0 = Date.now();
+  let walkStart = 0; // düz yürümeye ne zaman başladık
   while (bot.game.dimension === from && Date.now() - t0 < timeoutMs) {
     const p = bot.entity.position;
     const flat = Math.hypot(p.x - center.x, p.z - center.z);
-    if (flat > 3 || Math.abs(p.y - center.y) > 1.5) {
-      await A.goto(bot, new GoalNear(target.x, target.y, target.z, 1), 15000);
-    } else if (flat > 0.35) {
+    const inside = flat <= 0.35 && Math.abs(p.y - center.y) < 0.6;
+    if (inside) {
+      bot.clearControlStates();
+      walkStart = 0;
+    } else if (flat > 3 || Math.abs(p.y - center.y) > 1.5 || (walkStart && Date.now() - walkStart > 3000)) {
+      // Uzaktayız ya da düz yürüyerek giremedik (önümüzde engel var): yol bulucu.
+      bot.clearControlStates();
+      A.dbg("portala yol bulucuyla giriyorum:", p.toString(), "hedef", target.toString());
+      await A.goto(bot, new GoalBlock(target.x, target.y, target.z), 10000);
+      walkStart = 0;
+    } else {
+      if (!walkStart) walkStart = Date.now();
       await bot.lookAt(center.offset(0, 1.6, 0), true);
       bot.setControlState("forward", true);
       bot.setControlState("jump", bot.entity.isCollidedHorizontally);
-    } else {
-      bot.clearControlStates();
     }
     await A.sleep(50);
   }
@@ -541,6 +553,7 @@ module.exports = {
   descendTo,
   wearGold,
   placeBlockAt,
+  prepareFrame,
   buildFrame,
   ensureFire,
   lightPortal,
