@@ -2,8 +2,8 @@
 
 // Faz 3 koşu akışı:
 //   odun → tahta kazma → taş kazma + kılıç → yemek → yıkık portal → sandık → çerçeve → yak → NETHER
-//   → blaze spawner → blaze çubukları
-// Sonraki bölümler (pearl, kaleye dönüş) buraya eklenecek.
+//   → blaze spawner → blaze çubukları → warped forest → ender gözleri
+//   → portala dönüş → OVERWORLD → kale → portal odası → gözleri tak
 
 const {
   goals: { GoalNearXZ, GoalNear },
@@ -17,6 +17,7 @@ const H = require("./highway");
 const L = require("./lavacast");
 const E = require("./pearl");
 const R = require("./prep");
+const K = require("./stronghold");
 const { Vec3 } = require("vec3");
 const { scanLoaded } = require("./scanner");
 const { makePlan } = require("./planner");
@@ -26,6 +27,7 @@ const LOGS_NEEDED = 10; // aletler, 4 kazmanın çubukları, fırın yakıtı, y
 const COBBLE_NEEDED = 16; // kazma 3 + kılıç 2 + 3 yedek kazma 9 + yedek
 const RODS_NEEDED = 6; // 12 göz için 12 toz = 6 çubuk (kalenin yeri belli, göz atmıyoruz)
 const FOOD_WANTED = 6;
+const GOALS = ["nether", "blaze", "pearl", "kale"]; // koşunun nereye kadar gideceği
 
 // Uzak bir (x,z) noktasına parça parça yürü; ilerleme durursa bırak.
 async function travelXZ(bot, x, z, range, maxMs = 240000) {
@@ -259,9 +261,39 @@ async function stagePearls(bot, info, timer, say, guard) {
   timer.split(`Ender gözü (${eyes})`);
 }
 
+// Overworld'e dön, kaleye yürü, portal odasına kaz, gözleri tak.
+async function stageStronghold(bot, info, timer, say, skipReturn) {
+  if (!info.kale) throw new Error("Kalenin yeri bilinmiyor");
+  if (!skipReturn) {
+    if (!(await K.returnToOverworld(bot, info.netherPortal, say))) throw new Error("Portaldan Overworld'e geçilemedi");
+    await S.waitForChunks(bot, 800, 15000);
+    timer.split("Overworld'e dönüş");
+  }
+  bot.pathfinder.movements.allowParkour = true;
+  // Tünel için kazma ve dolgu: Nether'da tükenmiş olabilir.
+  if (A.count(bot, (i) => i.name.endsWith("_pickaxe")) < 2) {
+    say("Kazma kalmamış: yeniden alet yapıyorum");
+    await stageTools(bot, timer);
+  }
+  const [kx, kz] = info.kale;
+  say(`Kaleye gidiyorum (${kx}, ${kz})`);
+  if (!(await travelXZ(bot, kx, kz, 24, 1200000))) throw new Error("Kaleye ulaşılamadı");
+  timer.split("Kaleye varış");
+  await S.waitForChunks(bot, 800, 10000);
+  const room = await K.locatePortalRoom(bot, info.kale, say);
+  if (!room) throw new Error("Portal odası bulunamadı");
+  say(`Portal odası: ${room.center.x}, ${room.center.y}, ${room.center.z}`);
+  if (A.count(bot, H.isFiller) < 48) await R.ensureCobble(bot, 48);
+  if (!(await K.tunnelToRoom(bot, room, say))) throw new Error("Portal odasına ulaşılamadı");
+  timer.split("Portal odası");
+  const r = await K.fillPortal(bot, room, say);
+  if (!r.open) throw new Error("Gözler takıldı ama portal açılmadı");
+  timer.split(`End portalı açıldı (${r.placed} göz)`);
+}
+
 /**
  * info: { portal: [x, z], bastion, fortress, kale, warped }  (seed avcısı / doğrulamadan)
- * opts: { start: "bastan" | "portal", goal: "pearl" | "blaze" | "nether", chat, delay }
+ * opts: { start: "bastan" | "portal" | "kale", goal: "kale" | "pearl" | "blaze" | "nether", chat, delay }
  */
 async function run(bot, info, opts = {}) {
   if (opts.delay) {
@@ -284,6 +316,13 @@ async function run(bot, info, opts = {}) {
   S.fireGuard(bot);
   const guard = C.startGuard(bot, { say });
   try {
+    const goal = Math.max(0, GOALS.indexOf(opts.goal || "blaze"));
+    if (opts.start === "kale") {
+      // Test kısayolu: doğrudan kale aşaması.
+      await stageStronghold(bot, info, timer, say, true);
+      say(`🟣 End portalı açık. Süre: ${fmt(timer.elapsed())}`);
+      return timer;
+    }
     if (opts.start !== "portal") {
       await stageTools(bot, timer);
       const meat = await C.huntFood(bot, FOOD_WANTED, { radius: 32, budgetMs: 30000 });
@@ -291,14 +330,19 @@ async function run(bot, info, opts = {}) {
     }
     await stagePortal(bot, info, timer, say);
     const p = bot.entity.position.floored();
+    info.netherPortal = p;
     say(`🔥 Nether'dayım (${p.x}, ${p.y}, ${p.z}). Süre: ${fmt(timer.elapsed())}`);
-    if (opts.goal !== "nether") {
+    if (goal >= 1) {
       await stageFortress(bot, info, timer, say, guard);
       say(`🔥 Blaze çubukları tamam. Süre: ${fmt(timer.elapsed())}`);
     }
-    if (opts.goal === "pearl") {
+    if (goal >= 2) {
       await stagePearls(bot, info, timer, say, guard);
       say(`🟢 Ender gözleri hazır. Süre: ${fmt(timer.elapsed())}`);
+    }
+    if (goal >= 3) {
+      await stageStronghold(bot, info, timer, say, false);
+      say(`🟣 End portalı açık. Süre: ${fmt(timer.elapsed())}`);
     }
   } finally {
     guard.stop();
@@ -308,4 +352,4 @@ async function run(bot, info, opts = {}) {
   return timer;
 }
 
-module.exports = { run, travelXZ };
+module.exports = { run, travelXZ, GOALS };

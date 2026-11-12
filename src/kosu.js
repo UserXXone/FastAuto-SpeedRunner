@@ -27,7 +27,7 @@ const RCON_PORT = 25575;
 const HUNTER = "seed-avci";
 const VERIFIER = "seed-dogrulama";
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-const GOALS = ["nether", "blaze", "pearl"]; // koşunun nereye kadar gideceği (--hedef)
+const { GOALS } = nether; // koşunun nereye kadar gideceği (--hedef)
 
 function parseXZ(s) {
   const m = /^\s*(-?\d+)\s*,\s*(-?\d+)\s*$/.exec(String(s || ""));
@@ -129,7 +129,9 @@ async function netherKosu(args) {
   const username = args.username || "Speedrunner";
   // Test kısayolları: "portal" alet aşamasını atlar; "dokum" ayrıca iki kova ve çakmak verir.
   const cast = args.basla === "dokum";
-  const start = args.basla === "portal" || cast ? "portal" : "bastan";
+  const kaleTest = args.basla === "kale"; // doğrudan kale aşaması (12 göz verilir)
+  if (kaleTest) args.hedef = "kale";
+  const start = kaleTest ? "kale" : args.basla === "portal" || cast ? "portal" : "bastan";
   const external = Boolean(args.host);
   if (!external && (!args.seed || args.seed === true))
     throw new Error("--seed vermelisin. Örnek: npm run nether -- --seed 123");
@@ -199,7 +201,7 @@ async function netherKosu(args) {
 
     // Warped forest'ın yeri (enderman avı için). Seed'den belli olan bir bilgi;
     // oyunun kendi /locate komutuyla öğreniyoruz.
-    if (rcon && args.hedef === "pearl" && !info.warped) {
+    if (rcon && ["pearl", "kale"].includes(args.hedef) && !kaleTest && !info.warped) {
       const nx = Math.round(info.portal[0] / 8);
       const nz = Math.round(info.portal[1] / 8);
       const cevap = await rcon.komut(`execute in minecraft:the_nether positioned ${nx} 64 ${nz} run locate biome minecraft:warped_forest`);
@@ -227,6 +229,15 @@ async function netherKosu(args) {
       for (const it of ["stone_pickaxe", "stone_pickaxe", "stone_pickaxe", "stone_pickaxe", "stone_sword", "oak_log 4", "cobblestone 12", "shield", "cooked_beef 12", "golden_boots"])
         await rcon.komut(`give ${username} ${it}`);
       if (cast) for (const it of ["bucket 2", "flint_and_steel"]) await rcon.komut(`give ${username} ${it}`);
+      await sleep(1500);
+    }
+
+    if (kaleTest && rcon) {
+      if (!info.kale) throw new Error("Bu seed'in kale konumu bilinmiyor");
+      console.log("TEST: kaleye ışınlanıyor, gözler veriliyor (gerçek koşu değil).");
+      await rcon.komut(`spreadplayers ${info.kale[0]} ${info.kale[1]} 0 4 false ${username}`);
+      for (const it of ["stone_pickaxe", "stone_pickaxe", "stone_pickaxe", "stone_sword", "cobblestone 64", "shield", "cooked_beef 12", "ender_eye 12"])
+        await rcon.komut(`give ${username} ${it}`);
       await sleep(1500);
     }
 
