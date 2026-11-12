@@ -150,7 +150,7 @@ async function walkInto(bot, to, jump) {
     bot.setControlState("jump", false);
   }
   const c = cellOf(bot);
-  return c.x === to.x && c.z === to.z;
+  return c.x === to.x && c.z === to.z && c.y === to.y;
 }
 
 // from'dan bitişik to hücresine güvenli geç (dy: -1, 0, +1).

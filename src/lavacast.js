@@ -21,6 +21,7 @@ const H = require("./highway");
 
 const isSolid = (b) => Boolean(b && b.boundingBox === "block");
 const isOpen = (b) => Boolean(b && b.boundingBox === "empty" && b.name !== "lava" && b.name !== "water");
+const AIRS = new Set(["air", "cave_air", "void_air"]);
 const buckets = (bot) => A.count(bot, (i) => ["bucket", "water_bucket", "lava_bucket"].includes(i.name));
 
 function rayClear(bot, from, to) {
@@ -40,7 +41,7 @@ async function useItemAt(bot, itemName, point, done) {
   for (let attempt = 0; attempt < 3; attempt++) {
     await A.withHand(bot, async () => {
       const item = bot.inventory.items().find((i) => i.name === itemName);
-      if (!item) throw new Error(`Envanterde yok: ${itemName}`);
+      if (!item) return; // kova yanlış yere gitmiş olabilir: çağıran done() ile anlar
       await bot.equip(item, "hand");
       await bot.lookAt(point, true);
       await A.sleep(150); // bakış sunucuya ulaşsın: kova, sunucunun gördüğü bakış yönüne göre çalışır
@@ -74,8 +75,24 @@ function vantage(bot, src) {
   return best ? best.c : null;
 }
 
-// Kovayı doldur: kind = "water" | "lava". center çevresindeki en yakın kaynaktan.
+// Kovayı doldur. Görünürde kaynak yoksa dört yöne doğru gezip yeni bölgeler yükler.
 async function fill(bot, kind, center, maxDistance = 96) {
+  if (await fillNear(bot, kind, center, maxDistance)) return true;
+  const {
+    goals: { GoalNearXZ },
+  } = require("mineflayer-pathfinder");
+  for (const [dx, dz] of [[1, 0], [0, 1], [-1, 0], [0, -1]]) {
+    const x = center.x + dx * 90;
+    const z = center.z + dz * 90;
+    A.dbg(`${kind} aranıyor: (${x}, ${z}) yönüne gidiyorum`);
+    await A.goto(bot, new GoalNearXZ(x, z, 8), 60000);
+    if (await fillNear(bot, kind, bot.entity.position.floored(), maxDistance)) return true;
+  }
+  return false;
+}
+
+// kind = "water" | "lava". center çevresindeki en uygun kaynaktan doldur.
+async function fillNear(bot, kind, center, maxDistance) {
   const full = `${kind}_bucket`;
   if (A.count(bot, full) > 0) return true;
   if (A.count(bot, "bucket") === 0) throw new Error("Boş kova yok");
@@ -83,18 +100,21 @@ async function fill(bot, kind, center, maxDistance = 96) {
   const sources = bot
     .findBlocks({ matching: id, useExtraInfo: (b) => b.metadata === 0, maxDistance, count: 400, point: center })
     .filter((p) => isOpen(bot.blockAt(p.offset(0, 1, 0)))) // üstü açık: yüzeyden alınabilir
-    .sort((a, b) => a.distanceTo(center) - b.distanceTo(center));
+    // Yakın olanı seç ama derindekini cezalandır: yeraltı gölüne inmek hem yavaş
+    // hem tehlikeli (karanlıkta canavar, boğulma).
+    .map((p) => ({ p, c: p.distanceTo(center) + Math.max(0, center.y - p.y - 4) * 4 }))
+    .sort((a, b) => a.c - b.c)
+    .map((o) => o.p);
   A.dbg(`${kind} kaynağı: ${sources.length} aday`);
   let tried = 0;
   for (const src of sources) {
-    if (tried >= 10) break;
+    if (tried++ >= 8) break;
     // Uzaktaysa önce yaklaş ki çevresi yüklensin ve duracak yer hesaplanabilsin.
     if (bot.entity.position.distanceTo(src) > 12) await A.goto(bot, new GoalNear(src.x, src.y, src.z, 5), 60000);
     const b = bot.blockAt(src);
     if (!b || b.type !== id || b.metadata !== 0) continue;
     const v = vantage(bot, src);
     if (!v) continue;
-    tried++;
     if (!(await A.goto(bot, new GoalBlock(v.x, v.y, v.z), 30000))) continue;
     if (await useItemAt(bot, "bucket", src.offset(0.5, 0.5, 0.5), () => A.count(bot, full) > 0)) return true;
   }
@@ -115,16 +135,17 @@ async function castAt(bot, P, normal) {
       const V = P.plus(normal.scaled(2 * sgn)).offset(0, 1, 0);
       const wb = bot.blockAt(W);
       const score = (isOpen(wb) ? 0 : 5) + (standable(bot, V) ? 0 : 1) + V.distanceTo(bot.entity.position) * 0.01;
-      return { W, V, score, wb };
+      return { W, V, score, wb, sgn };
     })
     .filter((s) => s.wb && s.wb.name !== "obsidian" && s.wb.name !== "bedrock")
     .sort((a, b) => a.score - b.score);
   if (!sides.length) return false;
-  const { W, V } = sides[0];
+  const { W, V, sgn } = sides[0];
   const B = W.offset(0, -1, 0);
 
   // Yerimize geç (gerekirse sütun dikerek).
-  if (bot.entity.position.distanceTo(V) > 6) await A.goto(bot, new GoalNear(V.x, V.y, V.z, 3), 45000);
+  // Önce yol bulucuyla yanına gel (V'nin üstünde/altında kalmışsak otoyol tek başına çözemiyor).
+  if (bot.entity.position.distanceTo(V) > 1.5) await A.goto(bot, new GoalNear(V.x, V.y, V.z, 2), 30000);
   const r = await H.highway(bot, V, { maxMs: 40000 });
   if (r !== "arrived") {
     A.dbg("döküm yerine geçilemedi:", r, V.toString());
@@ -137,14 +158,21 @@ async function castAt(bot, P, normal) {
     if (!isSolid(bot.blockAt(B)) && !(await H.placeFiller(bot, B))) return false;
     for (const c of [W, W.offset(0, 1, 0), P]) {
       const b = bot.blockAt(c);
-      if (b && !isOpen(b) && b.name !== "water" && !(await H.clearCell(bot, c, [W, W.offset(0, 1, 0), P]))) return false;
+      if (!b || AIRS.has(b.name) || b.name === "water") continue;
+      if (b.boundingBox === "empty") {
+        // Ot, çiçek, sarmaşık: kova ışını bunlara çarpıp suyu yanlış hücreye koyar.
+        try { await bot.dig(b, true); } catch (err) { A.dbg("bitki temizlenemedi:", b.name); }
+      } else if (!(await H.clearCell(bot, c, [W, W.offset(0, 1, 0), P]))) return false;
     }
     const nameAt = (c) => {
       const b = bot.blockAt(c);
       return b ? b.name : "";
     };
     // 1) Su.
-    if (!(await useItemAt(bot, "water_bucket", B.offset(0.5, 1, 0.5), () => nameAt(W) === "water"))) {
+    // Hedef nokta B'nin üst yüzünde, P'ye doğru kaydırılmış: bot biraz kaymış ya da
+    // eğilmiş olsa da ışın kendi bastığı bloğun kenarına takılmasın.
+    const waterAim = B.offset(0.5, 1, 0.5).minus(normal.scaled(sgn * 0.3));
+    if (!(await useItemAt(bot, "water_bucket", waterAim, () => nameAt(W) === "water"))) {
       A.dbg("su konamadı:", W.toString());
       return false;
     }

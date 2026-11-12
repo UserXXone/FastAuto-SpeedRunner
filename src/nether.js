@@ -137,12 +137,16 @@ async function stagePortal(bot, info, timer, say) {
     for (const cell of castCells) {
       let ok = false;
       for (let attempt = 0; attempt < 3 && !ok; attempt++) {
+        // Önceki deneme suyu kaybetmiş olabilir; dolgu bloğu da lazım (S, B, basamak).
+        await R.ensureCobble(bot, 12);
+        if (!(await L.fill(bot, "water", center))) throw new Error("Yakında su bulunamadı (obsidyen dökmek için gerekli)");
         if (!(await L.fill(bot, "lava", center))) throw new Error("Yakında lav bulunamadı (obsidyen dökmek için gerekli)");
         ok = await L.castAt(bot, cell, normal);
       }
       if (!ok) throw new Error(`Obsidyen dökülemedi: ${cell.x}, ${cell.y}, ${cell.z}`);
       say(`  obsidyen döküldü (${++done}/${castCells.length})`);
     }
+    await A.sleep(2500); // dökümden kalan akan su portalın içinden çekilsin
     timer.split(`Lavla obsidyen (${castCells.length})`);
   }
   await P.buildFrame(bot, plan, say, itemCells);

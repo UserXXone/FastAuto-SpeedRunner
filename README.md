@@ -107,10 +107,12 @@ npm start -- --plan harita/seed-12345.json
 
 ## 3) Nether koşusu (Faz 3, yapım aşamasında)
 
-Tam oyunu bitirme yolundaki ilk bölüm: bot doğma noktasından başlar ve **Nether'a girer**.
+Tam oyunu bitirme yolundaki ilk bölüm: bot doğma noktasından başlar, **Nether'a girer** ve blaze çubuklarını toplar.
 
 ```
-Odun → Tahta kazma → Taş kazma + kılıç → Yıkık portal → Sandık → Çerçeveyi tamamla → Yak → NETHER
+Odun → Tahta kazma → Taş kazma + kılıç → Yedek kazmalar → Yemek (hayvan avı) → Yıkık portal → Sandık
+→ (gerekirse demir + kova + lavla obsidyen) → Çerçeve → Yak → NETHER
+→ Blaze spawner'ın altına kapalı tünel → Blaze çiftliği (6 çubuk)
 ```
 
 Bu mod **Minecraft 1.21.1** kullanır (seed avcısıyla aynı sürüm) ve **Java 21** ister. Sunucuyu kendi açar; sunucu sadece `127.0.0.1`'de dinler.
@@ -120,7 +122,7 @@ npm run nether -- --seed -2192408593595833481
 ```
 
 - Seed panelde (seed.zeax.dev) görünen bir seed olmalı. Yıkık portalın, fortress'in ve bastion'ın yeri oradan okunur. Panelde olmayan bir seed için `--portal x,z` ver.
-- Bot portalı **sandıktaki obsidyenle** tamamlar ve sandıktaki çakmak ya da ateş topuyla yakar. Çakmak yoksa çakmaktaşı + 9 demir parçasından kendi yapar. Sandığı yetmeyen seed'lerde durur (lav dökerek obsidyen yapma henüz yok). Panelde **Portal** sütununda "tamamlanır" ya da "tamam" yazan seed'leri seç.
+- Bot portalı **sandıktaki obsidyenle** tamamlar ve sandıktaki çakmak ya da ateş topuyla yakar. Çakmak yoksa çakmaktaşı + 9 demir parçasından kendi yapar. Sandıktaki obsidyen yetmezse demir, kova ve lavla eksik blokları yerinde dökmeyi dener (aşağıda "deneysel"). Panelde **Portal** sütununda "tamamlanır" ya da "tamam" yazan seed'leri seç.
 - Çerçevenin içinde kalan ot, sarmaşık, toprak gibi blokları temizler. Çerçevede ağlayan obsidyen varsa kırar, ama taş kazmayla tanesi yaklaşık 1 dakika sürer.
 - Sandıkta altın zırh varsa giyer (Nether'da piglinler saldırmasın diye).
 - Koşu sonuçları `kosu/veri/kosular.json` dosyasına yazılır.
@@ -132,9 +134,26 @@ npm run nether -- --seed -2192408593595833481
 | `--izle <sn>` | Koşu bitince sunucuyu bu kadar açık tut |
 | `--tut` | Koşudan sonra dünyayı silme (`kosu/dunya`) |
 | `--host`, `--port` | Sunucu açma, var olan bir 1.21.1 sunucusuna bağlan |
+| `--hedef nether` | Blaze aşamasını atlar, Nether'a girince durur |
+| `--basla dokum` | Test için: portal kısayolu gibi, ayrıca iki kova ve çakmak verir (lavla obsidyen dökmeyi denemek için) |
 | `--basla portal` | Test için: alet aşamasını atlar, botu portalın yanına ışınlar ve alet verir. Gerçek koşu sayılmaz. |
 
 Çalışırken bu makinedeki seed avcısı duraklatılır, bitince geri açılır. Seed doğrulaması sürüyorsa koşu başlamaz (ikisine birden RAM yetmez).
+
+**Nether'da nasıl ilerliyor?**
+
+- Bot Nether'da açıkta yürümez: hedefe **kapalı bir tünel** örerek gider (`src/highway.js`). Her adımda önündeki blokları kazar, yanındaki boşlukları ve lavı kapatır.
+- Kayanın içinden geçmek bedava, açık havada her adım yaklaşık 6 blok ister. Bu yüzden bot önce tünel kazarak dolgu bloğu (netherrack vb.) toplar, sonra en ucuz yüksekliği seçip o hat boyunca gider.
+
+**Blaze çiftliği**
+
+- Bot spawner'ın çevresindeki 5x5x3 boşluğu kapalı odaya çevirir.
+- Kendisi spawner'ın **tam altında** saklanır ve blaze'leri oradan kılıçla keser. Blaze'ler botu göremediği için ateş etmez.
+- Yere düşen çubukları odaya girmeden, zeminin altından toplar.
+
+**Deneysel:** Lavla obsidyen dökme (`src/lavacast.js`) yazıldı ama henüz baştan sona doğrulanmadı. Sandıktaki obsidyen yetmeyen seed'lerde bu yola güvenme.
+
+**Dürüst olmak gerekirse:** Bot görüş hattı olmadan blok koyar ve duvarın arkasındaki blaze'e vurur. Sunucu bunu kabul eder ama normal bir oyuncu bunu yapamaz. Bu yüzden bu koşular da **speedrun.com'a gönderilemez**.
 
 **Oyundan izlemek için** (bot uzak bir sunucuda koşuyorsa): kendi bilgisayarında `ssh -L 25565:localhost:25565 kullanici@sunucu` ile tünel aç, Minecraft 1.21.1'de **Multiplayer → Direct Connection → `localhost`** ile gir. Koşuya `--bekle 30` eklersen girmen için 30 saniye bekler.
 
@@ -163,6 +182,11 @@ npm start -- --help
 - `src/harita.js`: Seed modu. Geçici sunucuyu açar ve kaşif botu `tp` ile gezdirip tarar.
 - `src/portal.js`: Yıkık portal. Yapıyı bulur, en ucuz çerçeveyi planlar (kaç obsidyen koyulacak, ne kırılacak), obsidyenleri koyar, yakar ve içine girer. Aynı planlayıcıyı seed doğrulayıcı da kullanır.
 - `src/nether.js`: Nether koşusunun aşamaları.
+- `src/highway.js`: Nether'da kapalı tünelle yol alma ve dolgu bloğu toplama. En ucuz yüksekliği seçer.
+- `src/fortress.js`: Blaze spawner'ı bulur, çevresini kapalı odaya çevirir, altında saklanıp blaze keser, çubukları toplar.
+- `src/combat.js`: Dövüş ve hayatta kalma: yakındaki düşmana vurma, yemek yeme, hayvan avı, kalkan.
+- `src/prep.js`: Nether öncesi hazırlık: yedek kazmalar, demir, kova, çakmak, altın zırh.
+- `src/lavacast.js`: Kovayla lavdan obsidyen dökme (deneysel).
 - `src/kosu.js`: Nether koşusu için sunucuyu açar, botu sokar, sonucu kaydeder.
 
 ## Bilinen sınırlar

@@ -302,7 +302,10 @@ async function farmBlazes(bot, spawner, need, say, opts = {}) {
       const blazes = hostiles.filter((e) => e.name === "blaze");
       const inside = blazes.filter((b) => inRoom(spawner, b.position));
       for (const b of inside) seen.add(b.id);
-      const floorRods = rodDrops(bot, center, 6).filter((d) => inRoom(spawner, d.position));
+      // Spawner'ın tepesine düşen çubuğa alttan ulaşılamaz: sayma, yoksa boş tur atılır.
+      const floorRods = rodDrops(bot, center, 6).filter(
+        (d) => inRoom(spawner, d.position) && !(Math.floor(d.position.x) === spawner.x && Math.floor(d.position.z) === spawner.z),
+      );
 
       // Odayı kapat / tamir et. Bir yaratığın durduğu hücreye blok koyulamaz; o
       // zaman seyrek dene: her deneme kılıcı elden bırakır, vuruşlar zayıflar.
@@ -326,7 +329,7 @@ async function farmBlazes(bot, spawner, need, say, opts = {}) {
           `çiftlik: can ${bot.health.toFixed(0)} açlık ${bot.food} çubuk ${rods()} (+${floorRods.length} yerde) öldürülen ${kills}`,
           `blaze ${blazes.length} (içeride ${inside.length}) oda ${sealed ? "kapalı" : "AÇIK"} dolgu ${A.count(bot, isFiller)}`,
           inside.slice(0, 4).map((b) => `[${b.position.x.toFixed(1)},${b.position.y.toFixed(1)},${b.position.z.toFixed(1)} menzil ${C.reachDistance(bot, b).toFixed(1)}]`).join(" "),
-          roomGaps(bot, spawner).slice(0, 6).map((c) => `${c}:${bot.blockAt(c).name}`).join(" "),
+          roomGaps(bot, spawner).slice(0, 6).map((c) => `${c}:${(bot.blockAt(c) || {}).name}`).join(" "),
         );
       }
 
