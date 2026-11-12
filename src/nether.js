@@ -15,6 +15,7 @@ const C = require("./combat");
 const F = require("./fortress");
 const H = require("./highway");
 const L = require("./lavacast");
+const E = require("./pearl");
 const R = require("./prep");
 const { Vec3 } = require("vec3");
 const { scanLoaded } = require("./scanner");
@@ -226,9 +227,41 @@ async function stageFortress(bot, info, timer, say, guard) {
   timer.split(`Blaze (${r.rods} çubuk, ${r.kills} blaze)`);
 }
 
+// Warped forest'a kapalı tünelle git, enderman avla, ender gözlerini yap.
+async function stagePearls(bot, info, timer, say, guard) {
+  let ground = E.findWarpedGround(bot);
+  if (!ground) {
+    if (!info.warped) throw new Error("Warped forest'ın yeri bilinmiyor (yakında da görünmüyor)");
+    const [wx, wz] = info.warped;
+    say(`Warped forest'a gidiyorum (${wx}, ${wz})`);
+    if (A.count(bot, H.isFiller) < 96) await F.stockScaffold(bot, 160, { x: wx, z: wz });
+    const r = await H.highway(bot, { x: wx, y: null, z: wz }, {
+      range: 8, maxMs: 420000, enclosed: true, until: () => Boolean((ground = E.findWarpedGround(bot, 40))),
+    });
+    A.dbg("warped otoyolu:", r);
+    ground = ground || E.findWarpedGround(bot);
+  }
+  if (!ground) throw new Error("Warped forest zemini bulunamadı");
+  if (A.count(bot, H.isFiller) < 48) await F.stockScaffold(bot, 96, ground);
+  const r = await H.highway(bot, ground, { maxMs: 240000, enclosed: true, descendEarly: true });
+  A.dbg("av yerine varış:", r, H.cellOf(bot).toString());
+  timer.split("Warped forest'a varış");
+
+  guard.pause();
+  let res;
+  try {
+    res = await E.huntEndermen(bot, E.PEARLS_NEEDED, say);
+  } finally {
+    guard.resume();
+  }
+  timer.split(`Ender pearl (${res.pearls} pearl, ${res.kills} enderman)`);
+  const eyes = await E.craftEyes(bot);
+  timer.split(`Ender gözü (${eyes})`);
+}
+
 /**
- * info: { portal: [x, z], bastion, fortress, kale }  (seed avcısı / doğrulamadan)
- * opts: { start: "bastan" | "portal", goal: "blaze" | "nether", chat, delay }
+ * info: { portal: [x, z], bastion, fortress, kale, warped }  (seed avcısı / doğrulamadan)
+ * opts: { start: "bastan" | "portal", goal: "pearl" | "blaze" | "nether", chat, delay }
  */
 async function run(bot, info, opts = {}) {
   if (opts.delay) {
@@ -262,6 +295,10 @@ async function run(bot, info, opts = {}) {
     if (opts.goal !== "nether") {
       await stageFortress(bot, info, timer, say, guard);
       say(`🔥 Blaze çubukları tamam. Süre: ${fmt(timer.elapsed())}`);
+    }
+    if (opts.goal === "pearl") {
+      await stagePearls(bot, info, timer, say, guard);
+      say(`🟢 Ender gözleri hazır. Süre: ${fmt(timer.elapsed())}`);
     }
   } finally {
     guard.stop();

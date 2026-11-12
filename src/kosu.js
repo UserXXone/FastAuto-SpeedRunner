@@ -27,6 +27,7 @@ const RCON_PORT = 25575;
 const HUNTER = "seed-avci";
 const VERIFIER = "seed-dogrulama";
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const GOALS = ["nether", "blaze", "pearl"]; // koşunun nereye kadar gideceği (--hedef)
 
 function parseXZ(s) {
   const m = /^\s*(-?\d+)\s*,\s*(-?\d+)\s*$/.exec(String(s || ""));
@@ -140,7 +141,7 @@ async function netherKosu(args) {
       (info.kaynak ? ` [${info.kaynak}]` : ""),
   );
 
-  const result = { seed, zaman: Math.floor(Date.now() / 1000), hedef: args.hedef === "nether" ? "nether" : "blaze", basla: start, basarili: false };
+  const result = { seed, zaman: Math.floor(Date.now() / 1000), hedef: GOALS.includes(args.hedef) ? args.hedef : "blaze", basla: start, basarili: false };
   let server = null;
   let rcon = null;
   let hunterStopped = false;
@@ -196,6 +197,17 @@ async function netherKosu(args) {
       await rcon.baglan(RCON_PORT, sifre);
     }
 
+    // Warped forest'ın yeri (enderman avı için). Seed'den belli olan bir bilgi;
+    // oyunun kendi /locate komutuyla öğreniyoruz.
+    if (rcon && args.hedef === "pearl" && !info.warped) {
+      const nx = Math.round(info.portal[0] / 8);
+      const nz = Math.round(info.portal[1] / 8);
+      const cevap = await rcon.komut(`execute in minecraft:the_nether positioned ${nx} 64 ${nz} run locate biome minecraft:warped_forest`);
+      const m = /\[(-?\d+), (?:~|-?\d+), (-?\d+)\]/.exec(cevap);
+      if (m) info.warped = [Number(m[1]), Number(m[2])];
+      console.log(info.warped ? `Warped forest: ${info.warped.join(", ")} (Nether)` : "Warped forest bulunamadı");
+    }
+
     const c = connect(args.host || "127.0.0.1", Number(args.port || PORT), username);
     bot = c.bot;
     await c.spawned;
@@ -222,7 +234,7 @@ async function netherKosu(args) {
     const timer = await Promise.race([
       nether.run(bot, info, {
         start,
-        goal: args.hedef === "nether" ? "nether" : "blaze",
+        goal: GOALS.includes(args.hedef) ? args.hedef : "blaze",
         chat: Boolean(args.chat),
         delay: Number(args.bekle || 0),
         onSplit: (s, all) => { result.asamalar = all; setStatus({ asama: s.name, asamalar: all }); },

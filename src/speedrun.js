@@ -80,20 +80,66 @@ function setupMovements(bot) {
 
 // Hava azalınca yolu bırak ve yukarı yüz.
 function airGuard(bot) {
+  // Yüzme: hava azalınca en yakın hava boşluğunu bul ve oraya yüz; üstümüz
+  // kapalıysa tavanı kaz. (Eskiden sadece zıplıyordu; tavanlı su mağarasında boğuluyordu.)
+  // Kurtarma sürerken bot.inLavaEscape doğrudur: diğer döngüler kontrolü bırakır.
+  const AIR = new Set(["air", "cave_air", "void_air"]);
   let rescuing = false;
-  bot.on("breath", async () => {
-    if (rescuing || bot.oxygenLevel >= 8) return;
+  const headInWater = () => {
     const head = bot.blockAt(bot.entity.position.offset(0, 1.6, 0));
-    if (!head || head.name !== "water") return;
+    return Boolean(head && head.name === "water");
+  };
+  const nearestAir = () => {
+    const eye = bot.entity.position.offset(0, 1.6, 0).floored();
+    let best = null;
+    for (let dy = 0; dy <= 10; dy++)
+      for (let dx = -6; dx <= 6; dx++)
+        for (let dz = -6; dz <= 6; dz++) {
+          const p = eye.offset(dx, dy, dz);
+          const b = bot.blockAt(p);
+          if (!b || !AIR.has(b.name)) continue;
+          const below = bot.blockAt(p.offset(0, -1, 0));
+          if (!below || below.name === "lava") continue;
+          const d = Math.hypot(dx, dz) * 1.5 + dy; // yukarı çıkmak yana gitmekten kolay
+          if (!best || d < best.d) best = { d, p };
+        }
+    return best ? best.p.offset(0.5, 0.2, 0.5) : null;
+  };
+  bot.on("breath", async () => {
+    if (rescuing || bot.oxygenLevel >= 10 || !headInWater()) return;
     rescuing = true;
-    console.log(`🫧 Hava azaldı (${bot.oxygenLevel}/20), yüzeye çıkıyorum`);
+    bot.inLavaEscape = true;
+    console.log(`🫧 Hava azaldı (${bot.oxygenLevel}/20), hava boşluğuna yüzüyorum`);
     bot.pathfinder.setGoal(null);
-    bot.setControlState("jump", true);
-    bot.setControlState("forward", false);
     const t0 = Date.now();
-    while (bot.oxygenLevel < 18 && Date.now() - t0 < 15000) await A.sleep(200);
-    bot.setControlState("jump", false);
-    rescuing = false;
+    try {
+      while ((headInWater() || bot.oxygenLevel < 16) && Date.now() - t0 < 25000 && bot.health > 0) {
+        const target = nearestAir();
+        if (target) {
+          await bot.lookAt(target, true);
+          const flat = Math.hypot(target.x - bot.entity.position.x, target.z - bot.entity.position.z);
+          bot.setControlState("forward", flat > 0.4);
+          bot.setControlState("sprint", true);
+        } else {
+          bot.setControlState("forward", false);
+        }
+        bot.setControlState("jump", true); // suda zıplamak = yukarı yüzmek
+        // Başımızın üstü katıysa kaz (tavanlı su mağarası).
+        const above = bot.blockAt(bot.entity.position.offset(0, 2.1, 0));
+        if (above && above.boundingBox === "block" && above.hardness != null && above.hardness >= 0 && (!target || target.y > bot.entity.position.y + 2)) {
+          try {
+            await bot.dig(above, true);
+          } catch (err) {
+            /* kazılamadı, yüzmeye devam */
+          }
+        }
+        await A.sleep(100);
+      }
+    } finally {
+      bot.clearControlStates();
+      bot.inLavaEscape = false;
+      rescuing = false;
+    }
   });
 }
 
@@ -122,6 +168,7 @@ function magmaGuard(bot) {
 function lavaGuard(bot) {
   const lava = bot.registry.blocksByName.lava;
   let target = null;
+  let escaping = false; // bu korumanın kendi durumu (yüzme kurtarması da aynı bayrağı kullanır)
   const safeSpot = () => {
     const me = bot.entity.position.floored();
     let best = null;
@@ -147,7 +194,8 @@ function lavaGuard(bot) {
     const waist = bot.blockAt(bot.entity.position.offset(0, 0.9, 0));
     const inLava = Boolean((feet && feet.type === lava.id) || (waist && waist.type === lava.id));
     if (inLava) {
-      if (!bot.inLavaEscape) {
+      if (!escaping) {
+        escaping = true;
         bot.inLavaEscape = true;
         const p = bot.entity.position;
         const head = bot.blockAt(p.offset(0, 1, 0));
@@ -163,7 +211,8 @@ function lavaGuard(bot) {
       bot.setControlState("jump", true);
       bot.setControlState("sprint", true);
       bot.setControlState("sneak", false);
-    } else if (bot.inLavaEscape) {
+    } else if (escaping) {
+      escaping = false;
       bot.inLavaEscape = false;
       target = null;
       bot.clearControlStates();
