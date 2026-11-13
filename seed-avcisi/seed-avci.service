@@ -1,11 +1,14 @@
 [Unit]
-Description=FastAuto seed avcisi (VDS = pc 6/6, 4 cekirdek)
+Description=FastAuto seed avcisi (VDS = pc 6, 4 cekirdek; toplam PC panelden)
 After=network.target
 
 [Service]
 Type=simple
 WorkingDirectory=/root/FastAuto-SpeedRunner/seed-avcisi
-ExecStart=/root/FastAuto-SpeedRunner/seed-avcisi/bin/seed-avcisi --pc 6 --toplam 6 --cekirdek 4 --sessiz
+# Toplam PC sayısını panel yazar (toplam.env); dosya yoksa 64.
+Environment=TOPLAM=64
+EnvironmentFile=-/root/FastAuto-SpeedRunner/seed-avcisi/toplam.env
+ExecStart=/root/FastAuto-SpeedRunner/seed-avcisi/bin/seed-avcisi --pc 6 --toplam ${TOPLAM} --cekirdek 4 --sessiz
 # Durdururken SIGTERM gelir; program sonuçları kaydedip kapanır.
 KillSignal=SIGTERM
 TimeoutStopSec=60

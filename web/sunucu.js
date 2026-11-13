@@ -30,6 +30,24 @@ const OTURUM_GUN = 30
 
 // ---------------------------------------------------------------- ayarlar
 
+// Toplam PC sayısı: arama alanı buna bölünür, bütün bilgisayarlarda aynı olmalı.
+// Tek kaynak bu dosya: Windows programları /api/surum'dan, VDS'teki servis
+// EnvironmentFile olarak buradan okur.
+const TOPLAM_DOSYA = path.join(VERI_DIZIN, 'toplam.env')
+const TOPLAM_VARSAYILAN = 64
+function toplamOku () {
+  try {
+    const m = /^TOPLAM=(\d+)/m.exec(fs.readFileSync(TOPLAM_DOSYA, 'utf8'))
+    const n = m ? Number(m[1]) : 0
+    return n >= 1 && n <= 64 ? n : TOPLAM_VARSAYILAN
+  } catch {
+    return TOPLAM_VARSAYILAN
+  }
+}
+function toplamYaz (n) {
+  fs.writeFileSync(TOPLAM_DOSYA, `TOPLAM=${n}\n`)
+}
+
 function ayarOku () {
   try {
     return JSON.parse(fs.readFileSync(AYAR, 'utf8'))
@@ -261,10 +279,10 @@ function windowsPaketi (ayar) {
 
 1. Bu klasoru masaustune cikar (zip icinden calistirma).
 2. seed-avcisi.exe'ye (ya da baslat.bat'a) cift tikla: bir pencere acilir.
-3. Ilk seferde iki kutuyu doldur, "Baslat"a bas:
-   - Bilgisayar no: her PC'ye farkli numara (1, 2, 3, 4, 5).
+3. Ilk seferde "Bilgisayar no" kutusunu doldur, "Baslat"a bas:
+   - Her PC'ye farkli numara ver (1, 2, 3, 4, 5, 7, 8 ...).
      VDS 6 numarali, onu kullanma.
-   - Toplam PC: hepsinde ayni sayi (6).
+   - Toplam PC sayisini program panelden kendisi alir.
    Sonraki acilislarda kendiliginden baslar.
 4. Sonuclar 30 saniyede bir ${PANEL_URL} paneline otomatik gider.
    Pencerede "Panele yukleme: tamam" yazmali.
@@ -302,6 +320,11 @@ function panelSayfasi () {
 <a class="cikis" href="/cikis">Çıkış</a></header>
 <main>
   <section id="ozet" class="kartlar"></section>
+  <div class="kontrol">
+    <label>Toplam PC <input id="tpSayi" type="number" min="6" max="64" step="1"></label>
+    <button id="tpKaydet" type="button" class="ikincil">Kaydet</button>
+    <span class="soluk" id="tpBilgi">Bütün bilgisayarlar bu sayıyı panelden alır. Değişince taramaya yeni dilimden başlarlar; bulunan seed'ler korunur.</span>
+  </div>
   <div class="kontrol"><button id="duraklat" type="button" disabled>…</button>
   <span class="soluk" id="kontrolBilgi">Sadece bu sunucudaki (VDS) taramayı yönetir. Duraklatınca ilerleme kaydedilir, devam edince kaldığı yerden sürer.</span></div>
   <h2>Bilgisayarlar</h2>
@@ -447,7 +470,7 @@ async function istek (req, res) {
     }
     const e = exeBilgisi()
     if (!e) return gonder(res, 404, 'text/plain; charset=utf-8', 'Paket yok')
-    if (url.pathname === '/api/surum') return gonder(res, 200, 'application/json; charset=utf-8', JSON.stringify({ surum: e.surum, sha256: e.sha256, boyut: e.veri.length }))
+    if (url.pathname === '/api/surum') return gonder(res, 200, 'application/json; charset=utf-8', JSON.stringify({ surum: e.surum, sha256: e.sha256, boyut: e.veri.length, toplam: toplamOku() }))
     return gonder(res, 200, 'application/octet-stream', e.veri)
   }
 
@@ -499,6 +522,7 @@ async function istek (req, res) {
       enIyiler: liste.filter((r) => !r.hata).sort((a, b) => a.gercekSure - b.gercekSure).slice(0, 50),
       hatalar: liste.filter((r) => r.hata).slice(-5)
     }
+    d.toplamPc = toplamOku()
     const ks = kosuOku()
     const kosuAktif = (await servisDurumu(KOSU_BIRIM)) === 'active'
     d.kosu = {
@@ -535,6 +559,22 @@ async function istek (req, res) {
     o.guncellendi = 0  // elle yüklenen PC çevrimiçi sayılmasın
     yuklemeKaydet(o)
     return gonder(res, 200, 'text/plain; charset=utf-8', `PC ${o.pc} yüklendi (${o.enIyiler.length} seed)`)
+  }
+  if (url.pathname === '/api/toplam' && req.method === 'POST') {
+    if (req.headers['x-panel'] !== '1') return gonder(res, 403, 'text/plain; charset=utf-8', 'Yasak')
+    let n
+    try {
+      n = Number(JSON.parse(await govdeOku(req)).toplam)
+    } catch {
+      return gonder(res, 400, 'text/plain; charset=utf-8', 'Hatalı istek')
+    }
+    if (!tam(n, 6, 64)) return gonder(res, 400, 'text/plain; charset=utf-8', 'Toplam PC 6 ile 64 arasında olmalı (VDS 6 numara)')
+    if (n !== toplamOku()) {
+      toplamYaz(n)
+      // VDS'teki avcı çalışıyorsa yeni sayıyla yeniden başlasın.
+      execFile('systemctl', ['try-restart', SERVIS], { timeout: 90000 }, () => {})
+    }
+    return gonder(res, 200, 'text/plain; charset=utf-8', `Toplam PC: ${n}. Bilgisayarlar en geç 10 dakikada kendiliğinden geçer.`)
   }
   if (url.pathname === '/api/kosu' && req.method === 'POST') {
     if (req.headers['x-panel'] !== '1') return gonder(res, 403, 'text/plain; charset=utf-8', 'Yasak')

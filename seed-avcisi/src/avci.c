@@ -52,7 +52,7 @@ static double simdiMs(void) { struct timespec t; clock_gettime(CLOCK_MONOTONIC, 
 
 #define MC MC_1_21_1
 #define SURUM "1.21.1"
-#define PROGRAM_SURUM "3"   /* tam sayı: otomatik güncelleme bununla karşılaştırır */
+#define PROGRAM_SURUM "4"   /* tam sayı: otomatik güncelleme bununla karşılaştırır */
 #define BLOK 64          /* bir iş parçacığının tek seferde aldığı 48-bit sayısı */
 #define MAX_THREAD 256
 
@@ -405,8 +405,11 @@ static void oncekiniYukle(void)
         int n = fscanf(d, "%d %d %" SCNu64 " %lf", &pc, &toplam, &blok, &sure);
         if (n >= 3) {
             if (pc != A.pc || toplam != A.toplam) {
+                /* Dilim değişti: taramaya baştan başla. Bulunan seed'ler aşağıda yine
+                 * dosyadan okunur (kaybolmaz, aynısı ikinci kez eklenmez); süre de korunur. */
                 fprintf(stderr, "Uyarı: %s başka bir ayarla (pc %d/%d) kaydedilmiş. Baştan başlıyorum.\n",
                         A.durum, pc, toplam);
+                if (n == 4) g_oncekiSure = sure;
             } else {
                 g_siradakiBlok = g_baslangicBlok = blok;
                 if (n == 4) g_oncekiSure = sure;
@@ -578,6 +581,7 @@ __attribute__((used)) static const char g_isaret[] = "FASTAUTO-SURUM:" PROGRAM_S
 static int g_gunAcik = 1;
 static volatile int g_gunDurum = 0;  /* 0: bakılmadı, 1: güncel, 2: indiriliyor, 3: hazır, 4: hata */
 static volatile int g_yeniSurum = 0;
+static volatile int g_panelToplam = 0;  /* panelin bildirdiği toplam PC sayısı (0: henüz bilinmiyor) */
 
 static int sha256Hex(const BYTE *d, DWORD n, char *hex)
 {
@@ -594,7 +598,7 @@ static int sha256Hex(const BYTE *d, DWORD n, char *hex)
     return ok;
 }
 
-static void guncellemeBak(void)
+static void guncellemeBak(int indir)
 {
     char cevap[512]; DWORD n = 0; long kod = 0;
     if (!g_panelHttps) return;  /* sadece şifreli bağlantıdan */
@@ -602,7 +606,9 @@ static void guncellemeBak(void)
     cevap[n] = 0;
     int surum = 0; long boyut = 0; char sha[80] = "";
     const char *a = strstr(cevap, "\"surum\":"), *b = strstr(cevap, "\"sha256\":\""), *c = strstr(cevap, "\"boyut\":");
-    if (!a || !b || !c) return;
+    const char *tp = strstr(cevap, "\"toplam\":");
+    if (tp) { int v = atoi(tp + 9); if (v >= 1 && v <= 64) g_panelToplam = v; }
+    if (!indir || g_gunDurum == 3 || !a || !b || !c) return;
     surum = atoi(a + 8); boyut = atol(c + 8);
     snprintf(sha, 65, "%s", b + 10);
     if (surum <= atoi(PROGRAM_SURUM)) { g_gunDurum = 1; return; }
@@ -625,10 +631,10 @@ static void guncellemeBak(void)
 static DWORD WINAPI guncelleyici(LPVOID arg)
 {
     (void)arg;
-    Sleep(15000);
+    Sleep(3000);
     for (;;) {
-        if (g_gunAcik && g_yukAcik && g_gunDurum != 3) guncellemeBak();
-        Sleep(30 * 60 * 1000);
+        if (g_yukAcik) guncellemeBak(g_gunAcik);
+        Sleep(10 * 60 * 1000);
     }
     return 0;
 }
@@ -999,7 +1005,7 @@ static void pencereyiGoster(void)
 static void dugmeleriAyarla(void)
 {
     EnableWindow(GetDlgItem(g_pen, ID_PC), !g_calisiyor);
-    EnableWindow(GetDlgItem(g_pen, ID_TOPLAM), !g_calisiyor);
+    EnableWindow(GetDlgItem(g_pen, ID_TOPLAM), !g_calisiyor && !g_yukAcik);  /* panel varsa sayı oradan gelir */
     EnableWindow(GetDlgItem(g_pen, ID_CEKIRDEK), !g_calisiyor);
     EnableWindow(GetDlgItem(g_pen, ID_BASLAT), !g_calisiyor);
     EnableWindow(GetDlgItem(g_pen, ID_DURDUR), g_calisiyor);
@@ -1050,8 +1056,8 @@ static void guiCiz(void)
     if (!g_calisiyor) {
         snprintf(d, sizeof d, "%s\n\nPanele yükleme : %s\nGüncelleme     : %s",
                  g_durduruldu ? "Durduruldu ve kaydedildi. \"Başlat\" kaldığı yerden devam eder."
-                              : "Bilgisayar numarasını ve toplam PC sayısını yazıp \"Başlat\"a bas.\n"
-                                "Her bilgisayara farklı numara ver; toplam hepsinde aynı olmalı.",
+                              : "Bilgisayar numarasını yazıp \"Başlat\"a bas. Her bilgisayara farklı numara ver.\n"
+                                "Toplam PC sayısı panelden kendiliğinden gelir.",
                  y, gun);
         yaziKoy(GetDlgItem(g_pen, ID_DURUM), d);
         return;
@@ -1134,6 +1140,16 @@ static LRESULT CALLBACK penIslem(HWND h, UINT m, WPARAM w, LPARAM l)
         if ((w & 0xFFF0) == SC_MINIMIZE && g_tepsi) { ShowWindow(h, SW_HIDE); return 0; }
         break;
     case WM_TIMER:
+        if (g_panelToplam > 0 && g_panelToplam != sayiAl(ID_TOPLAM)) {
+            /* Panelde toplam PC değişti: yeni dilime geç. Numaramız yeni toplamı aşıyorsa dokunma. */
+            int pc = sayiAl(ID_PC);
+            if (!g_calisiyor) SetDlgItemInt(h, ID_TOPLAM, (UINT)g_panelToplam, FALSE);
+            else if (pc <= g_panelToplam) {
+                ayarKaydet(pc, g_panelToplam, sayiAl(ID_CEKIRDEK));
+                motorDurdur();
+                kendiniBaslat();
+            }
+        }
         if (g_gunDurum == 3 && g_gunAcik) {
             guiCiz();
             if (g_calisiyor) motorDurdur();
@@ -1173,10 +1189,10 @@ static int guiCalistir(int gizli)
         MessageBoxW(NULL, L"Seed Avcısı zaten çalışıyor.", L"Seed Avcısı", MB_OK | MB_ICONINFORMATION);
         return 1;
     }
-    int pc = 0, toplam = 0, cek = 0, gun = 1, cpu = 100, tepsi = 1, oto = 0;
+    int pc = 0, toplam = 64, cek = 0, gun = 1, cpu = 100, tepsi = 1, oto = 0;
     FILE *f = fopen("ayar.txt", "r");
     if (f) {
-        if (fscanf(f, "%d %d %d %d %d %d %d", &pc, &toplam, &cek, &gun, &cpu, &tepsi, &oto) < 2) pc = toplam = 0;
+        if (fscanf(f, "%d %d %d %d %d %d %d", &pc, &toplam, &cek, &gun, &cpu, &tepsi, &oto) < 2) { pc = 0; toplam = 64; }
         fclose(f);
     }
     if (cpu < 1 || cpu > 100) cpu = 100;

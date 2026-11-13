@@ -119,6 +119,14 @@ async function kosuIstek (govde) {
   $('#kBilgi').textContent = r.ok ? 'İstek gönderildi…' : await r.text()
   setTimeout(yenile, 1500)
 }
+$('#tpKaydet') && $('#tpKaydet').addEventListener('click', async () => {
+  const r = await fetch('/api/toplam', { method: 'POST', headers: { 'X-Panel': '1', 'Content-Type': 'application/json' }, body: JSON.stringify({ toplam: Number($('#tpSayi').value) }) })
+  $('#tpBilgi').textContent = await r.text()
+  $('#tpSayi').dataset.elle = ''
+  setTimeout(yenile, 1000)
+})
+$('#tpSayi') && $('#tpSayi').addEventListener('input', (e) => { e.target.dataset.elle = '1' })
+
 $('#kDurdur') && $('#kDurdur').addEventListener('click', () => kosuIstek({ eylem: 'durdur' }))
 
 const dk = (ms) => { const s = Math.floor(ms / 1000); return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}` }
@@ -197,6 +205,7 @@ function ciz (d) {
   mesgul = Boolean((d.dogrulama && d.dogrulama.calisiyor) || (d.kosu && d.kosu.calisiyor))
   kontrolCiz(d.servis)
   dogrulamaCiz(d.dogrulama)
+  if ($('#tpSayi') && !$('#tpSayi').dataset.elle && d.toplamPc) $('#tpSayi').value = d.toplamPc
   kosuCiz(d.kosu)
   const aktif = d.pcler.filter((p) => p.cevrimici)
   const toplamHiz = aktif.reduce((s, p) => s + p.hiz, 0)
