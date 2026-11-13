@@ -96,36 +96,67 @@ async function locatePortalRoom(bot, kale, say = () => {}) {
   return room;
 }
 
+const isAirName = (b) => Boolean(b && b.boundingBox === "empty" && !["lava", "water"].includes(b.name));
+const isLavaB = (b) => Boolean(b && b.name === "lava");
+
+// Halkanın ortası (3x3) altı lavlı bir çukur: orada ASLA durma. Göz takmak için
+// çerçeve yüksekliğinde, halkanın DIŞINDA, zemini sağlam ve lavsız hücreler.
+function standCells(bot, room) {
+  const c = room.center;
+  const out = [];
+  for (let dx = -5; dx <= 5; dx++)
+    for (let dz = -5; dz <= 5; dz++) {
+      if (Math.abs(dx) <= 2 && Math.abs(dz) <= 2 && !(Math.abs(dx) === 2 && Math.abs(dz) === 2)) continue; // halka + içi
+      const cell = new Vec3(Math.floor(c.x) + dx, c.y, Math.floor(c.z) + dz);
+      const floor = bot.blockAt(cell.offset(0, -1, 0));
+      const feet = bot.blockAt(cell);
+      const head = bot.blockAt(cell.offset(0, 1, 0));
+      if (!floor || floor.boundingBox !== "block" || floor.name === "magma_block") continue;
+      if (!isAirName(feet) || !isAirName(head)) continue;
+      // Yanlarında lav olmasın (kenardan kaymayalım).
+      let lav = false;
+      for (const [ax, az] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+        if (isLavaB(bot.blockAt(cell.offset(ax, 0, az))) || isLavaB(bot.blockAt(cell.offset(ax, -1, az)))) lav = true;
+      }
+      if (!lav) out.push(cell);
+    }
+  return out;
+}
+
+const reachOf = (cell, frame) => cell.offset(0.5, 1.62, 0.5).distanceTo(frame.offset(0.5, 0.82, 0.5));
+
 /**
- * Yüzeyden portal halkasının ortasına (çerçevelerin bir üstü) tünel kaz.
+ * Yüzeyden portal odasına (halkanın dışındaki bir duruş noktasına) tünel kaz.
+ * Dönen: duruş hücresi ya da null.
  */
 async function tunnelToRoom(bot, room, say = () => {}) {
-  const T = room.center.offset(0, 1, 0);
-  const at = () => {
-    const c = H.cellOf(bot);
-    return c.x === T.x && c.z === T.z && c.y === T.y;
-  };
-  for (let attempt = 0; attempt < 3 && !at(); attempt++) {
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const cells = standCells(bot, room);
+    if (!cells.length) {
+      A.dbg("duruş noktası yok: halkanın çevresi henüz yüklenmemiş olabilir");
+      await A.sleep(1500);
+      continue;
+    }
     const me = bot.entity.position;
+    cells.sort((a, b) => a.distanceTo(me) - b.distanceTo(me));
+    const T = cells[0];
     const drop = me.y - T.y;
     const flat = Math.hypot(me.x - T.x, me.z - T.z);
     // Merdiven her adımda bir blok iner: yeterince uzaktan başlamak gerek.
     if (drop > 0 && flat < drop + 6) {
       const ang = flat > 1 ? Math.atan2(me.z - T.z, me.x - T.x) : 0;
       const d = drop + 8;
-      const ex = Math.round(T.x + Math.cos(ang) * d);
-      const ez = Math.round(T.z + Math.sin(ang) * d);
-      A.dbg(`merdiven başı: (${ex}, ${ez}), iniş ${drop.toFixed(0)}`);
-      await A.goto(bot, new GoalNearXZ(ex, ez, 2), 60000);
+      await A.goto(bot, new GoalNearXZ(Math.round(T.x + Math.cos(ang) * d), Math.round(T.z + Math.sin(ang) * d), 2), 60000);
     }
-    say(`Portal odasına tünel: hedef ${T.x}, ${T.y}, ${T.z}`);
+    say(`Portal odasına tünel: duruş ${T.x}, ${T.y}, ${T.z}`);
     let r = await H.highway(bot, T, { range: 6, maxMs: 420000, enclosed: true, descendEarly: true });
     A.dbg("kale tüneli:", r, H.cellOf(bot).toString());
-    // Son adımlar açık: kapalı tüp çerçevelerin üstünü doldurmasın.
     r = await H.highway(bot, T, { maxMs: 90000 });
-    A.dbg("halkanın ortası:", r, H.cellOf(bot).toString());
+    A.dbg("duruş noktası:", r, H.cellOf(bot).toString());
+    const c = H.cellOf(bot);
+    if (c.y === room.center.y && !isLavaB(bot.blockAt(c.offset(0, -1, 0)))) return c;
   }
-  return at();
+  return null;
 }
 
 async function insertEye(bot, pos) {
@@ -151,33 +182,39 @@ async function insertEye(bot, pos) {
   return hasEye(bot.blockAt(pos));
 }
 
+// Çerçeveye elimiz yetişmiyorsa halkanın dışında, ona en yakın duruş noktasına geç.
+async function moveNear(bot, room, frame) {
+  const cur = H.cellOf(bot);
+  if (reachOf(cur, frame) <= 3.9) return true;
+  const best = standCells(bot, room)
+    .filter((c) => reachOf(c, frame) <= 3.9)
+    .sort((a, b) => a.distanceTo(cur) - b.distanceTo(cur))[0];
+  if (!best) return false;
+  const r = await H.highway(bot, best, { maxMs: 40000 });
+  A.dbg("çerçeveye yaklaşma:", r, H.cellOf(bot).toString());
+  const now = H.cellOf(bot);
+  return now.y === room.center.y && reachOf(now, frame) <= 4.2;
+}
+
 /**
- * Boş çerçevelere göz tak. Halkanın ortasında (çerçevelerin bir üstünde) durmalıyız.
- * Dönen: { placed, open } — open: portal açıldı mı.
+ * Boş çerçevelere göz tak; hep halkanın dışında dur. Dönen: { placed, open }
  */
 async function fillPortal(bot, room, say = () => {}) {
   const empty = () => room.frames.filter((p) => !hasEye(bot.blockAt(p)));
   let todo = empty();
   if (eyes(bot) < todo.length) throw new Error(`Göz yetmiyor: ${eyes(bot)} var, ${todo.length} lazım`);
   let placed = 0;
-  while (todo.length > 1) {
+  while (todo.length) {
+    // Elimizin yettiği çerçeveden başla: gereksiz yürümeyiz.
+    const cur = H.cellOf(bot);
+    todo.sort((a, b) => reachOf(cur, a) - reachOf(cur, b));
     const p = todo.shift();
+    if (!(await moveNear(bot, room, p))) throw new Error(`Çerçeveye yaklaşılamadı: ${p}`);
     if (!(await insertEye(bot, p))) throw new Error(`Göz takılamadı: ${p}`);
     placed++;
     say(`  göz ${12 - empty().length}/12`);
   }
-  if (todo.length === 1) {
-    // Son göz: önce halkanın dışına, komşu bir çerçevenin üstüne koyduğumuz bloğa çık.
-    const last = todo[0];
-    const perch = room.frames
-      .filter((p) => !p.equals(last))
-      .sort((a, b) => a.distanceTo(last) - b.distanceTo(last))[0];
-    const r = await H.highway(bot, perch.offset(0, 2, 0), { maxMs: 60000 });
-    A.dbg("son göz için yer:", r, H.cellOf(bot).toString());
-    if (!(await insertEye(bot, last))) throw new Error(`Son göz takılamadı: ${last}`);
-    placed++;
-  }
-  await A.sleep(500);
+  await A.sleep(700);
   const mid = bot.blockAt(room.center);
   return { placed, open: Boolean(mid && mid.name === "end_portal") };
 }
