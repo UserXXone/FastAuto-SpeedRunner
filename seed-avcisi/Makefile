@@ -26,7 +26,7 @@ bin/seed-avcisi: $(SRC)
 
 bin/seed-avcisi.exe: $(SRC)
 	mkdir -p bin
-	$(WINCC) $(FLAGS) $(WINFLAGS) -march=x86-64 -o $@ $(SRC) -lm -lwininet -ladvapi32 -lgdi32
+	$(WINCC) $(FLAGS) $(WINFLAGS) -march=x86-64 -o $@ $(SRC) -lm -lwininet -ladvapi32 -lgdi32 -lshell32
 
 temizle:
 	rm -rf bin

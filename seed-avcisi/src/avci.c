@@ -32,11 +32,13 @@
 #include <windows.h>
 #include <wininet.h>
 #include <wincrypt.h>
+#include <shellapi.h>
 typedef HANDLE thread_t;
 static CRITICAL_SECTION g_lock;
 #define LOCK() EnterCriticalSection(&g_lock)
 #define UNLOCK() LeaveCriticalSection(&g_lock)
 static void uyku_ms(int ms) { Sleep(ms); }
+static double simdiMs(void) { return (double)GetTickCount64(); }
 #else
 #include <pthread.h>
 #include <unistd.h>
@@ -45,11 +47,12 @@ static pthread_mutex_t g_lock = PTHREAD_MUTEX_INITIALIZER;
 #define LOCK() pthread_mutex_lock(&g_lock)
 #define UNLOCK() pthread_mutex_unlock(&g_lock)
 static void uyku_ms(int ms) { usleep(ms * 1000); }
+static double simdiMs(void) { struct timespec t; clock_gettime(CLOCK_MONOTONIC, &t); return t.tv_sec * 1e3 + t.tv_nsec / 1e6; }
 #endif
 
 #define MC MC_1_21_1
 #define SURUM "1.21.1"
-#define PROGRAM_SURUM "2"   /* tam sayı: otomatik güncelleme bununla karşılaştırır */
+#define PROGRAM_SURUM "3"   /* tam sayı: otomatik güncelleme bununla karşılaştırır */
 #define BLOK 64          /* bir iş parçacığının tek seferde aldığı 48-bit sayısı */
 #define MAX_THREAD 256
 
@@ -69,6 +72,7 @@ typedef struct {
 
 typedef struct {
     int pc, toplam, threads, topk;
+    int cpu;                /* işlemci kullanım sınırı, yüzde (100 = sınırsız) */
     double dakika;          /* 0 = sınırsız */
     int portalMax;          /* doğma → yıkık portal (blok) */
     int netherMax;          /* nether girişi → bastion/fortress (blok) */
@@ -80,6 +84,7 @@ typedef struct {
 } Ayar;
 
 static Ayar A;
+static double g_gorev = 1.0;              /* her iş parçacığının çalışma oranı (CPU sınırı) */
 static volatile int g_dur = 0;
 static uint64_t g_siradakiBlok = 0;     /* atomik */
 static uint64_t g_baslangicBlok = 0;
@@ -99,6 +104,25 @@ static Aday *g_top;      /* en iyiler, sn'ye göre artan */
 static int g_topN = 0;
 
 /* ------------------------------------------------------------------------- */
+
+/* CPU sınırı: çalıştığımız süreyle orantılı uyu. Sık çağrılır (her seed denemesinde),
+ * böylece yük saniyelerce tam gidip sonra toplu durmaz; kısa dilimlerle uyur. */
+static double g_kisT0[MAX_THREAD], g_kisBorc[MAX_THREAD];
+static void kis(int t)
+{
+    if (g_gorev >= 0.999) return;
+    double t1 = simdiMs();
+    g_kisBorc[t] += (t1 - g_kisT0[t]) * (1.0 / g_gorev - 1.0);
+    g_kisT0[t] = t1;
+    if (g_kisBorc[t] < 20) return;
+    while (g_kisBorc[t] >= 1 && !g_dur) {
+        int ms = g_kisBorc[t] > 100 ? 100 : (int)g_kisBorc[t];
+        uyku_ms(ms);
+        g_kisBorc[t] -= ms;
+    }
+    g_kisBorc[t] = 0;
+    g_kisT0[t] = simdiMs();
+}
 
 static double uzak(double x1, double z1, double x2, double z2)
 {
@@ -215,6 +239,7 @@ static void asamaB(uint64_t s48, const AdayA *a, Generator *gO, Generator *gN, i
 
     /* Üst 16 biti karışık sırada dene: ilk denemeler bile tüm aralığa yayılsın. */
     for (int k = 0; k < A.ust && !g_dur; k++) {
+        kis(t);
         uint64_t ust = ((uint64_t)k * 40503u + (s48 & 0xffff)) & 0xffff;
         uint64_t seed = (ust << 48) | s48;
         g_saySeed[t]++;
@@ -304,15 +329,19 @@ static void *calisan(void *arg)
     setupGenerator(&gO, MC, 0);
     setupGenerator(&gN, MC, 0);
     AdayA a;
+    g_kisT0[t] = simdiMs();
+    g_kisBorc[t] = 0;
     while (!g_dur) {
         uint64_t blok = __atomic_fetch_add(&g_siradakiBlok, 1, __ATOMIC_SEQ_CST);
         g_aktifBlok[t] = blok;
         for (uint64_t j = 0; j < BLOK && !g_dur; j++) {
             uint64_t s48 = s48Hesapla(blok * BLOK + j);
             g_saySay48[t]++;
-            if (!asamaA(s48, &a)) continue;
-            g_sayGecA[t]++;
-            asamaB(s48, &a, &gO, &gN, t);
+            if (asamaA(s48, &a)) {
+                g_sayGecA[t]++;
+                asamaB(s48, &a, &gO, &gN, t);
+            }
+            kis(t);
         }
     }
     g_aktifBlok[t] = UINT64_MAX;
@@ -604,8 +633,11 @@ static DWORD WINAPI guncelleyici(LPVOID arg)
     return 0;
 }
 
+static void guiKapat(void);
+
 static void kendiniBaslat(void)
 {
+    guiKapat();
     char ben[MAX_PATH];
     STARTUPINFOA si; PROCESS_INFORMATION pi;
     memset(&si, 0, sizeof si); si.cb = sizeof si;
@@ -791,6 +823,7 @@ static void yardim(void)
         "  --pc N          Bu bilgisayarin numarasi (1'den baslar)\n"
         "  --toplam M      Toplam kac bilgisayar tariyor\n"
         "  --cekirdek K    Kac cekirdek kullanilsin (varsayilan: hepsi)\n"
+        "  --cpu Y         Islemci kullanim siniri, yuzde (varsayilan: 100)\n"
         "  --cikti DOSYA   Sonuc dosyasi (varsayilan: seedler-pcN.txt)\n"
         "  --en-iyi K      Dosyada tutulacak en iyi seed sayisi (varsayilan: 1000)\n"
         "  --dakika D      D dakika sonra dur (varsayilan: Ctrl+C'ye kadar)\n"
@@ -814,13 +847,22 @@ static time_t g_bas, g_sonKayit;
 static void ayarVarsayilan(void)
 {
     memset(&A, 0, sizeof A);
-    A.topk = 1000;
+    A.topk = 1000; A.cpu = 100;
     A.portalMax = 120; A.netherMax = 120; A.kaleMax = 1700; A.dusukOncelik = 1; A.ust = 4096;
 }
 
 static void ayarDuzelt(void)
 {
-    if (A.threads <= 0) A.threads = cekirdekSayisi();
+    if (A.cpu < 1 || A.cpu > 100) A.cpu = 100;
+    if (A.threads <= 0) {
+        /* Sınır önce çekirdek sayısını azaltır, küsuratı uyuyarak tamamlar. */
+        double istenen = cekirdekSayisi() * A.cpu / 100.0;
+        A.threads = (int)ceil(istenen - 1e-9);
+        if (A.threads < 1) A.threads = 1;
+        g_gorev = istenen / A.threads;
+    } else g_gorev = A.cpu / 100.0;
+    if (g_gorev > 1) g_gorev = 1;
+    if (g_gorev < 0.01) g_gorev = 0.01;
     if (A.threads > MAX_THREAD) A.threads = MAX_THREAD;
     if (A.topk < 10) A.topk = 10;
     if (A.ust < 1) A.ust = 1;
@@ -889,9 +931,16 @@ static void motorDurdur(void)
 #ifdef _WIN32
 /* ------------------------------------------------------------------------- */
 /* Pencere (GUI). Seçenek verilmeden açılınca çalışır.
- * ayar.txt: "PC TOPLAM [CEKIRDEK] [GUNCELLE]" — varsa kendiliğinden başlar. */
+ * ayar.txt: "PC TOPLAM CEKIRDEK GUNCELLE CPU TEPSI OTO" — varsa kendiliğinden başlar.
+ * --arkaplan: pencereyi açmadan, saat yanındaki simgede başlar (Windows açılışı için). */
 
-enum { ID_PC = 101, ID_TOPLAM, ID_CEKIRDEK, ID_BASLAT, ID_DURDUR, ID_GUNCELLE, ID_DURUM, ID_LISTE };
+enum { ID_PC = 101, ID_TOPLAM, ID_CEKIRDEK, ID_BASLAT, ID_DURDUR, ID_GUNCELLE, ID_DURUM, ID_LISTE, ID_TEPSI, ID_OTO, ID_GOSTER, ID_CIKIS };
+#define WM_TEPSI (WM_APP + 1)
+#define OTO_ANAHTAR "Software\\Microsoft\\Windows\\CurrentVersion\\Run"
+#define OTO_AD "FastAutoSeedAvcisi"
+static NOTIFYICONDATAW g_nid;
+static int g_tepsi = 1;   /* kapatınca arka planda çalış */
+static int g_oto = 0;     /* Windows açılınca başla */
 static HWND g_pen;
 static int g_calisiyor = 0, g_durduruldu = 0;
 static char g_oncekiListe[8192];
@@ -910,12 +959,41 @@ static int sayiAl(int id)
     return atoi(t);
 }
 
-static void ayarKaydet(int pc, int toplam, int cekirdek)
+static void ayarKaydet(int pc, int toplam, int cpu)
 {
     FILE *f = fopen("ayar.txt", "w");
     if (!f) return;
-    fprintf(f, "%d %d %d %d\n", pc, toplam, cekirdek, g_gunAcik);
+    fprintf(f, "%d %d 0 %d %d %d %d\n", pc, toplam, g_gunAcik, cpu, g_tepsi, g_oto);
     fclose(f);
+}
+
+/* Windows açılışına ekle/çıkar: sadece bu kullanıcı için (HKCU), yönetici izni gerekmez. */
+static void otoAyarla(int ac)
+{
+    HKEY k;
+    if (RegOpenKeyExA(HKEY_CURRENT_USER, OTO_ANAHTAR, 0, KEY_SET_VALUE, &k) != ERROR_SUCCESS) return;
+    if (ac) {
+        char ben[MAX_PATH], v[MAX_PATH + 32];
+        GetModuleFileNameA(NULL, ben, sizeof ben);
+        snprintf(v, sizeof v, "\"%s\" --arkaplan", ben);
+        RegSetValueExA(k, OTO_AD, 0, REG_SZ, (const BYTE *)v, (DWORD)strlen(v) + 1);
+    } else RegDeleteValueA(k, OTO_AD);
+    RegCloseKey(k);
+}
+
+static void guiKapat(void)
+{
+    if (!g_pen) return;
+    Shell_NotifyIconW(NIM_DELETE, &g_nid);
+    DestroyWindow(g_pen);
+    g_pen = NULL;
+}
+
+static void pencereyiGoster(void)
+{
+    ShowWindow(g_pen, SW_SHOW);
+    ShowWindow(g_pen, SW_RESTORE);
+    SetForegroundWindow(g_pen);
 }
 
 static void dugmeleriAyarla(void)
@@ -929,17 +1007,21 @@ static void dugmeleriAyarla(void)
 
 static void guiBaslat(void)
 {
-    int pc = sayiAl(ID_PC), toplam = sayiAl(ID_TOPLAM), cek = sayiAl(ID_CEKIRDEK);
+    int pc = sayiAl(ID_PC), toplam = sayiAl(ID_TOPLAM), cpu = sayiAl(ID_CEKIRDEK);
+    if (cpu < 1 || cpu > 100) {
+        MessageBoxW(g_pen, L"CPU sınırı 1 ile 100 arasında olmalı (100 = sınırsız).", L"Seed Avcısı", MB_OK | MB_ICONWARNING);
+        pencereyiGoster();
+        return;
+    }
     if (toplam < 1 || pc < 1 || pc > toplam) {
         MessageBoxW(g_pen, L"Bilgisayar no 1 ile Toplam PC arasında olmalı.\nÖrnek: Bilgisayar no 3, Toplam PC 6.",
                     L"Seed Avcısı", MB_OK | MB_ICONWARNING);
         return;
     }
-    if (cek < 0) cek = 0;
-    ayarKaydet(pc, toplam, cek);
+    ayarKaydet(pc, toplam, cpu);
     /* Durdurulduktan sonra yeniden başlat: en temizi programı baştan açmak. */
     if (g_durduruldu) kendiniBaslat();
-    A.pc = pc; A.toplam = toplam; A.threads = cek;
+    A.pc = pc; A.toplam = toplam; A.threads = 0; A.cpu = cpu;
     ayarDuzelt();
     motorBaslat();
     g_calisiyor = 1;
@@ -987,7 +1069,7 @@ static void guiCiz(void)
     sureYaz(s1, sizeof s1, gecen); sureYaz(s2, sizeof s2, g_oncekiSure + gecen);
     kalanYaz(k1, sizeof k1, hiz > 0 ? kalan / hiz : 0);
     snprintf(d, sizeof d,
-             "Bilgisayar     : %d / %d   (%d çekirdek)\n"
+             "Bilgisayar     : %d / %d   (%d çekirdek, CPU sınırı %%%d)\n"
              "Süre           : bu oturum %s  |  toplam %s\n"
              "Hız            : %.0f yapı düzeni/sn\n"
              "Taranan        : %s  (%%%.8f)\n"
@@ -997,7 +1079,7 @@ static void guiCiz(void)
              "Sonuç dosyası  : %s\n"
              "Panele yükleme : %s\n"
              "Güncelleme     : %s",
-             A.pc, A.toplam, A.threads, s1, s2, hiz, b1, 100.0 * (double)taranan / (double)dilim, b2, k1,
+             A.pc, A.toplam, A.threads, A.cpu, s1, s2, hiz, b1, 100.0 * (double)taranan / (double)dilim, b2, k1,
              (int64_t)g_sonSeed, b3, b5, b4, A.cikti, g_yukAcik ? y : "kapalı (panel.txt yok)", gun);
     yaziKoy(GetDlgItem(g_pen, ID_DURUM), d);
 
@@ -1025,11 +1107,32 @@ static LRESULT CALLBACK penIslem(HWND h, UINT m, WPARAM w, LPARAM l)
     case WM_COMMAND:
         if (LOWORD(w) == ID_BASLAT) guiBaslat();
         else if (LOWORD(w) == ID_DURDUR) guiDurdur();
-        else if (LOWORD(w) == ID_GUNCELLE) {
+        else if (LOWORD(w) == ID_GOSTER) pencereyiGoster();
+        else if (LOWORD(w) == ID_CIKIS) { guiDurdur(); guiKapat(); }
+        else if (LOWORD(w) == ID_GUNCELLE || LOWORD(w) == ID_TEPSI || LOWORD(w) == ID_OTO) {
             g_gunAcik = IsDlgButtonChecked(h, ID_GUNCELLE) == BST_CHECKED;
+            g_tepsi = IsDlgButtonChecked(h, ID_TEPSI) == BST_CHECKED;
+            g_oto = IsDlgButtonChecked(h, ID_OTO) == BST_CHECKED;
+            if (LOWORD(w) == ID_OTO) otoAyarla(g_oto);
             if (sayiAl(ID_PC) > 0) ayarKaydet(sayiAl(ID_PC), sayiAl(ID_TOPLAM), sayiAl(ID_CEKIRDEK));
         }
         return 0;
+    case WM_TEPSI:
+        if (l == WM_LBUTTONUP || l == WM_LBUTTONDBLCLK) pencereyiGoster();
+        else if (l == WM_RBUTTONUP) {
+            POINT p;
+            GetCursorPos(&p);
+            HMENU m2 = CreatePopupMenu();
+            AppendMenuW(m2, MF_STRING, ID_GOSTER, L"Göster");
+            AppendMenuW(m2, MF_STRING, ID_CIKIS, L"Durdur ve çık");
+            SetForegroundWindow(h);
+            TrackPopupMenu(m2, TPM_RIGHTBUTTON, p.x, p.y, 0, h, NULL);
+            DestroyMenu(m2);
+        }
+        return 0;
+    case WM_SYSCOMMAND:
+        if ((w & 0xFFF0) == SC_MINIMIZE && g_tepsi) { ShowWindow(h, SW_HIDE); return 0; }
+        break;
     case WM_TIMER:
         if (g_gunDurum == 3 && g_gunAcik) {
             guiCiz();
@@ -1039,8 +1142,9 @@ static LRESULT CALLBACK penIslem(HWND h, UINT m, WPARAM w, LPARAM l)
         guiCiz();
         return 0;
     case WM_CLOSE:
+        if (g_tepsi) { ShowWindow(h, SW_HIDE); return 0; }  /* arka planda sürer; çıkış simgenin sağ tık menüsünde */
         guiDurdur();
-        DestroyWindow(h);
+        guiKapat();
         return 0;
     case WM_DESTROY:
         PostQuitMessage(0);
@@ -1057,21 +1161,27 @@ static HWND kontrol(const WCHAR *sinif, const WCHAR *yazi, DWORD stil, int x, in
     return c;
 }
 
-static int guiCalistir(void)
+static int guiCalistir(int gizli)
 {
+    {   /* Zaten açıksa (arka planda olabilir) onun penceresini öne getir. */
+        HWND var = FindWindowW(L"FastAutoSeedAvcisi", NULL);
+        if (var) { PostMessageW(var, WM_TEPSI, 0, WM_LBUTTONUP); return 0; }
+    }
     HANDLE tek = CreateMutexA(NULL, FALSE, "FastAutoSeedAvcisi");
     DWORD bek = WaitForSingleObject(tek, 8000);  /* güncellemede eski süreç kapanana kadar bekle */
     if (bek != WAIT_OBJECT_0 && bek != WAIT_ABANDONED) {
         MessageBoxW(NULL, L"Seed Avcısı zaten çalışıyor.", L"Seed Avcısı", MB_OK | MB_ICONINFORMATION);
         return 1;
     }
-    int pc = 0, toplam = 0, cek = 0, gun = 1;
+    int pc = 0, toplam = 0, cek = 0, gun = 1, cpu = 100, tepsi = 1, oto = 0;
     FILE *f = fopen("ayar.txt", "r");
     if (f) {
-        if (fscanf(f, "%d %d %d %d", &pc, &toplam, &cek, &gun) < 2) pc = toplam = 0;
+        if (fscanf(f, "%d %d %d %d %d %d %d", &pc, &toplam, &cek, &gun, &cpu, &tepsi, &oto) < 2) pc = toplam = 0;
         fclose(f);
     }
-    g_gunAcik = gun != 0;
+    if (cpu < 1 || cpu > 100) cpu = 100;
+    g_gunAcik = gun != 0; g_tepsi = tepsi != 0; g_oto = oto != 0;
+    if (g_oto) otoAyarla(1);  /* klasör taşındıysa yolu tazele */
     panelAyarOku();
 
     WNDCLASSW wc;
@@ -1083,7 +1193,7 @@ static int guiCalistir(void)
     wc.hbrBackground = (HBRUSH)(COLOR_BTNFACE + 1);
     wc.lpszClassName = L"FastAutoSeedAvcisi";
     RegisterClassW(&wc);
-    RECT r = { 0, 0, 760, 620 };
+    RECT r = { 0, 0, 760, 646 };
     DWORD stil = WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX;
     AdjustWindowRect(&r, stil, FALSE);
     g_pen = CreateWindowExW(0, wc.lpszClassName, L"FastAuto Seed Avcısı v" PROGRAM_SURUM " — Minecraft " SURUM, stil,
@@ -1097,19 +1207,33 @@ static int guiCalistir(void)
     kontrol(L"STATIC", L"Toplam PC:", 0, 176, 17, 76, 20, 0, fn);
     wsprintfW(t, L"%d", toplam);
     kontrol(L"EDIT", toplam ? t : L"", ES_NUMBER, 254, 14, 48, 24, ID_TOPLAM, fn);
-    kontrol(L"STATIC", L"Çekirdek (0 = hepsi):", 0, 318, 17, 140, 20, 0, fn);
-    wsprintfW(t, L"%d", cek);
+    kontrol(L"STATIC", L"CPU sınırı (%):", 0, 318, 17, 140, 20, 0, fn);
+    wsprintfW(t, L"%d", cpu);
     kontrol(L"EDIT", t, ES_NUMBER, 460, 14, 48, 24, ID_CEKIRDEK, fn);
     kontrol(L"BUTTON", L"Başlat", BS_DEFPUSHBUTTON, 530, 12, 104, 28, ID_BASLAT, fn);
     kontrol(L"BUTTON", L"Durdur", 0, 642, 12, 104, 28, ID_DURDUR, fn);
     kontrol(L"BUTTON", L"Otomatik güncelle (yeni sürümü panelden indirir ve yeniden başlar)", BS_AUTOCHECKBOX, 14, 48, 600, 22, ID_GUNCELLE, fn);
     CheckDlgButton(g_pen, ID_GUNCELLE, g_gunAcik ? BST_CHECKED : BST_UNCHECKED);
-    kontrol(L"STATIC", L"", 0, 14, 80, 732, 196, ID_DURUM, fm);
-    kontrol(L"STATIC", L"En iyi seed'ler  (sn = tahmini yol süresi, düşük = iyi; kopyalanabilir)", 0, 14, 284, 732, 20, 0, fn);
-    kontrol(L"EDIT", L"", ES_MULTILINE | ES_READONLY | ES_AUTOHSCROLL | WS_VSCROLL, 14, 306, 732, 300, ID_LISTE, fm);
+    kontrol(L"BUTTON", L"Kapatınca arka planda çalış (saat yanındaki simge; sağ tık: çıkış)", BS_AUTOCHECKBOX, 14, 72, 440, 22, ID_TEPSI, fn);
+    kontrol(L"BUTTON", L"Windows açılınca arka planda başla", BS_AUTOCHECKBOX, 470, 72, 276, 22, ID_OTO, fn);
+    CheckDlgButton(g_pen, ID_TEPSI, g_tepsi ? BST_CHECKED : BST_UNCHECKED);
+    CheckDlgButton(g_pen, ID_OTO, g_oto ? BST_CHECKED : BST_UNCHECKED);
+    kontrol(L"STATIC", L"", 0, 14, 106, 732, 196, ID_DURUM, fm);
+    kontrol(L"STATIC", L"En iyi seed'ler  (sn = tahmini yol süresi, düşük = iyi; kopyalanabilir)", 0, 14, 310, 732, 20, 0, fn);
+    kontrol(L"EDIT", L"", ES_MULTILINE | ES_READONLY | ES_AUTOHSCROLL | WS_VSCROLL, 14, 332, 732, 300, ID_LISTE, fm);
     dugmeleriAyarla();
-    ShowWindow(g_pen, SW_SHOW);
-    if (pc >= 1 && toplam >= 1 && pc <= toplam) guiBaslat();
+    memset(&g_nid, 0, sizeof g_nid);
+    g_nid.cbSize = sizeof g_nid;
+    g_nid.hWnd = g_pen;
+    g_nid.uID = 1;
+    g_nid.uFlags = NIF_ICON | NIF_MESSAGE | NIF_TIP;
+    g_nid.uCallbackMessage = WM_TEPSI;
+    g_nid.hIcon = LoadIcon(NULL, IDI_APPLICATION);
+    lstrcpyW(g_nid.szTip, L"FastAuto Seed Avcısı");
+    Shell_NotifyIconW(NIM_ADD, &g_nid);
+    int hazir = pc >= 1 && toplam >= 1 && pc <= toplam;
+    if (!(gizli && hazir)) ShowWindow(g_pen, SW_SHOW);  /* ayar yoksa gizli başlamanın anlamı yok */
+    if (hazir) guiBaslat();
     guiCiz();
     CreateThread(NULL, 0, guncelleyici, NULL, 0, NULL);
     SetTimer(g_pen, 1, 1000, NULL);
@@ -1136,7 +1260,7 @@ int main(int argc, char **argv)
         if (e) { *e = 0; SetCurrentDirectoryA(ben); }
     }
     eskiyiSil();
-    if (argc < 2) return guiCalistir();
+    if (argc < 2 || !strcmp(argv[1], "--arkaplan")) return guiCalistir(argc >= 2);
     /* Seçenek verildi: konsol modu. Exe pencere programı olarak derlendiği için konsolu kendimiz bağlarız. */
     if (!AttachConsole(ATTACH_PARENT_PROCESS)) AllocConsole();
     freopen("CONOUT$", "w", stdout);
@@ -1151,6 +1275,7 @@ int main(int argc, char **argv)
         SAYI("--pc", A.pc)
         SAYI("--toplam", A.toplam)
         SAYI("--cekirdek", A.threads)
+        SAYI("--cpu", A.cpu)
         SAYI("--en-iyi", A.topk)
         SAYI("--portal", A.portalMax)
         SAYI("--nether", A.netherMax)
