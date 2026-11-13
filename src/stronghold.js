@@ -100,10 +100,13 @@ const isAirName = (b) => Boolean(b && b.boundingBox === "empty" && !["lava", "wa
 const isLavaB = (b) => Boolean(b && b.name === "lava");
 
 // Halkanın ortası (3x3) altı lavlı bir çukur: orada ASLA durma. Göz takmak için
-// çerçeve yüksekliğinde, halkanın DIŞINDA, zemini sağlam ve lavsız hücreler.
+// çerçeve yüksekliğinde, halkanın DIŞINDA hücreler. Zemini sağlamsa maliyet 0;
+// boş ya da lavsa (çerçeveler lav havuzunun kıyısında olabilir) otoyol zemini kendisi
+// kurar, maliyet 3. Ayak/baş hücresi lav olamaz; sağlam blok ise kazılır.
 function standCells(bot, room) {
   const c = room.center;
   const out = [];
+  const hard = (b) => b && (b.name === "bedrock" || b.name === "end_portal_frame" || b.name === "spawner");
   for (let dx = -5; dx <= 5; dx++)
     for (let dz = -5; dz <= 5; dz++) {
       if (Math.abs(dx) <= 2 && Math.abs(dz) <= 2 && !(Math.abs(dx) === 2 && Math.abs(dz) === 2)) continue; // halka + içi
@@ -111,14 +114,13 @@ function standCells(bot, room) {
       const floor = bot.blockAt(cell.offset(0, -1, 0));
       const feet = bot.blockAt(cell);
       const head = bot.blockAt(cell.offset(0, 1, 0));
-      if (!floor || floor.boundingBox !== "block" || floor.name === "magma_block") continue;
-      if (!isAirName(feet) || !isAirName(head)) continue;
-      // Yanlarında lav olmasın (kenardan kaymayalım).
-      let lav = false;
-      for (const [ax, az] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
-        if (isLavaB(bot.blockAt(cell.offset(ax, 0, az))) || isLavaB(bot.blockAt(cell.offset(ax, -1, az)))) lav = true;
-      }
-      if (!lav) out.push(cell);
+      if (!floor || !feet || !head || hard(feet) || hard(head) || hard(floor)) continue;
+      if (isLavaB(feet) || isLavaB(head) || feet.name === "water" || head.name === "water") continue;
+      let cost = floor.boundingBox === "block" && floor.name !== "magma_block" ? 0 : 3;
+      if (feet.boundingBox === "block") cost += 1;
+      if (head.boundingBox === "block") cost += 1;
+      cell.cost = cost;
+      out.push(cell);
     }
   return out;
 }
@@ -138,7 +140,7 @@ async function tunnelToRoom(bot, room, say = () => {}) {
       continue;
     }
     const me = bot.entity.position;
-    cells.sort((a, b) => a.distanceTo(me) - b.distanceTo(me));
+    cells.sort((a, b) => a.distanceTo(me) + a.cost * 4 - (b.distanceTo(me) + b.cost * 4));
     const T = cells[0];
     const drop = me.y - T.y;
     const flat = Math.hypot(me.x - T.x, me.z - T.z);
@@ -188,9 +190,9 @@ async function moveNear(bot, room, frame) {
   if (reachOf(cur, frame) <= 3.9) return true;
   const best = standCells(bot, room)
     .filter((c) => reachOf(c, frame) <= 3.9)
-    .sort((a, b) => a.distanceTo(cur) - b.distanceTo(cur))[0];
-  if (!best) return false;
-  const r = await H.highway(bot, best, { maxMs: 40000 });
+    .sort((a, b) => a.distanceTo(cur) + a.cost * 4 - (b.distanceTo(cur) + b.cost * 4))[0];
+  if (!best) { A.dbg("yakın duruş hücresi yok:", frame.toString(), "aday", standCells(bot, room).length); return false; }
+  const r = await H.highway(bot, best, { maxMs: 60000 });
   A.dbg("çerçeveye yaklaşma:", r, H.cellOf(bot).toString());
   const now = H.cellOf(bot);
   return now.y === room.center.y && reachOf(now, frame) <= 4.2;
