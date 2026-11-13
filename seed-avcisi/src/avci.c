@@ -52,7 +52,7 @@ static double simdiMs(void) { struct timespec t; clock_gettime(CLOCK_MONOTONIC, 
 
 #define MC MC_1_21_1
 #define SURUM "1.21.1"
-#define PROGRAM_SURUM "4"   /* tam sayı: otomatik güncelleme bununla karşılaştırır */
+#define PROGRAM_SURUM "5"   /* tam sayı: otomatik güncelleme bununla karşılaştırır */
 #define BLOK 64          /* bir iş parçacığının tek seferde aldığı 48-bit sayısı */
 #define MAX_THREAD 256
 
@@ -940,13 +940,14 @@ static void motorDurdur(void)
  * ayar.txt: "PC TOPLAM CEKIRDEK GUNCELLE CPU TEPSI OTO" — varsa kendiliğinden başlar.
  * --arkaplan: pencereyi açmadan, saat yanındaki simgede başlar (Windows açılışı için). */
 
-enum { ID_PC = 101, ID_TOPLAM, ID_CEKIRDEK, ID_BASLAT, ID_DURDUR, ID_GUNCELLE, ID_DURUM, ID_LISTE, ID_TEPSI, ID_OTO, ID_GOSTER, ID_CIKIS };
+enum { ID_PC = 101, ID_TOPLAM, ID_CEKIRDEK, ID_BASLAT, ID_DURDUR, ID_GUNCELLE, ID_DURUM, ID_LISTE, ID_TEPSI, ID_OTO, ID_GOSTER, ID_CIKIS, ID_GIZLE };
 #define WM_TEPSI (WM_APP + 1)
 #define OTO_ANAHTAR "Software\\Microsoft\\Windows\\CurrentVersion\\Run"
 #define OTO_AD "FastAutoSeedAvcisi"
 static NOTIFYICONDATAW g_nid;
 static int g_tepsi = 1;   /* kapatınca arka planda çalış */
 static int g_oto = 0;     /* Windows açılınca başla */
+static int g_gizle = 0;   /* sessiz mod: tepsi simgesi de yok (yeniden açmak için exe'ye çift tıkla) */
 static HWND g_pen;
 static int g_calisiyor = 0, g_durduruldu = 0;
 static char g_oncekiListe[8192];
@@ -969,7 +970,7 @@ static void ayarKaydet(int pc, int toplam, int cpu)
 {
     FILE *f = fopen("ayar.txt", "w");
     if (!f) return;
-    fprintf(f, "%d %d 0 %d %d %d %d\n", pc, toplam, g_gunAcik, cpu, g_tepsi, g_oto);
+    fprintf(f, "%d %d 0 %d %d %d %d %d\n", pc, toplam, g_gunAcik, cpu, g_tepsi, g_oto, g_gizle);
     fclose(f);
 }
 
@@ -985,6 +986,12 @@ static void otoAyarla(int ac)
         RegSetValueExA(k, OTO_AD, 0, REG_SZ, (const BYTE *)v, (DWORD)strlen(v) + 1);
     } else RegDeleteValueA(k, OTO_AD);
     RegCloseKey(k);
+}
+
+static void tepsiAyarla(void)
+{
+    if (g_gizle) Shell_NotifyIconW(NIM_DELETE, &g_nid);
+    else Shell_NotifyIconW(NIM_ADD, &g_nid);
 }
 
 static void guiKapat(void)
@@ -1115,7 +1122,16 @@ static LRESULT CALLBACK penIslem(HWND h, UINT m, WPARAM w, LPARAM l)
         else if (LOWORD(w) == ID_DURDUR) guiDurdur();
         else if (LOWORD(w) == ID_GOSTER) pencereyiGoster();
         else if (LOWORD(w) == ID_CIKIS) { guiDurdur(); guiKapat(); }
-        else if (LOWORD(w) == ID_GUNCELLE || LOWORD(w) == ID_TEPSI || LOWORD(w) == ID_OTO) {
+        else if (LOWORD(w) == ID_GUNCELLE || LOWORD(w) == ID_TEPSI || LOWORD(w) == ID_OTO || LOWORD(w) == ID_GIZLE) {
+            int eskiGizle = g_gizle;
+            g_gizle = IsDlgButtonChecked(h, ID_GIZLE) == BST_CHECKED;
+            if (g_gizle != eskiGizle) {
+                if (g_gizle) {  /* simge kalkarsa pencere de gizli kalmalı, yoksa program görünmez olur */
+                    CheckDlgButton(h, ID_TEPSI, BST_CHECKED);
+                    MessageBoxW(h, L"Sessiz mod: pencere kapatılınca program hiçbir yerde görünmez, arka planda çalışmayı sürdürür.\n\nYeniden açmak için seed-avcisi.exe'ye çift tıkla. Tamamen kapatmak için penceredeki \"Programdan çık\" düğmesini kullan.", L"Seed Avcısı", MB_OK | MB_ICONINFORMATION);
+                }
+                tepsiAyarla();
+            }
             g_gunAcik = IsDlgButtonChecked(h, ID_GUNCELLE) == BST_CHECKED;
             g_tepsi = IsDlgButtonChecked(h, ID_TEPSI) == BST_CHECKED;
             g_oto = IsDlgButtonChecked(h, ID_OTO) == BST_CHECKED;
@@ -1189,14 +1205,15 @@ static int guiCalistir(int gizli)
         MessageBoxW(NULL, L"Seed Avcısı zaten çalışıyor.", L"Seed Avcısı", MB_OK | MB_ICONINFORMATION);
         return 1;
     }
-    int pc = 0, toplam = 64, cek = 0, gun = 1, cpu = 100, tepsi = 1, oto = 0;
+    int pc = 0, toplam = 64, cek = 0, gun = 1, cpu = 100, tepsi = 1, oto = 0, gizle = 0;
     FILE *f = fopen("ayar.txt", "r");
     if (f) {
-        if (fscanf(f, "%d %d %d %d %d %d %d", &pc, &toplam, &cek, &gun, &cpu, &tepsi, &oto) < 2) { pc = 0; toplam = 64; }
+        if (fscanf(f, "%d %d %d %d %d %d %d %d", &pc, &toplam, &cek, &gun, &cpu, &tepsi, &oto, &gizle) < 2) { pc = 0; toplam = 64; }
         fclose(f);
     }
     if (cpu < 1 || cpu > 100) cpu = 100;
-    g_gunAcik = gun != 0; g_tepsi = tepsi != 0; g_oto = oto != 0;
+    g_gunAcik = gun != 0; g_tepsi = tepsi != 0; g_oto = oto != 0; g_gizle = gizle != 0;
+    if (g_gizle) g_tepsi = 1;
     if (g_oto) otoAyarla(1);  /* klasör taşındıysa yolu tazele */
     panelAyarOku();
 
@@ -1209,7 +1226,7 @@ static int guiCalistir(int gizli)
     wc.hbrBackground = (HBRUSH)(COLOR_BTNFACE + 1);
     wc.lpszClassName = L"FastAutoSeedAvcisi";
     RegisterClassW(&wc);
-    RECT r = { 0, 0, 760, 646 };
+    RECT r = { 0, 0, 760, 672 };
     DWORD stil = WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX;
     AdjustWindowRect(&r, stil, FALSE);
     g_pen = CreateWindowExW(0, wc.lpszClassName, L"FastAuto Seed Avcısı v" PROGRAM_SURUM " — Minecraft " SURUM, stil,
@@ -1234,9 +1251,12 @@ static int guiCalistir(int gizli)
     kontrol(L"BUTTON", L"Windows açılınca arka planda başla", BS_AUTOCHECKBOX, 470, 72, 276, 22, ID_OTO, fn);
     CheckDlgButton(g_pen, ID_TEPSI, g_tepsi ? BST_CHECKED : BST_UNCHECKED);
     CheckDlgButton(g_pen, ID_OTO, g_oto ? BST_CHECKED : BST_UNCHECKED);
-    kontrol(L"STATIC", L"", 0, 14, 106, 732, 196, ID_DURUM, fm);
-    kontrol(L"STATIC", L"En iyi seed'ler  (sn = tahmini yol süresi, düşük = iyi; kopyalanabilir)", 0, 14, 310, 732, 20, 0, fn);
-    kontrol(L"EDIT", L"", ES_MULTILINE | ES_READONLY | ES_AUTOHSCROLL | WS_VSCROLL, 14, 332, 732, 300, ID_LISTE, fm);
+    kontrol(L"BUTTON", L"Sessiz mod: tepsi simgesini de gizle (açmak için exe'ye çift tıkla)", BS_AUTOCHECKBOX, 14, 98, 600, 22, ID_GIZLE, fn);
+    kontrol(L"BUTTON", L"Programdan çık", 0, 630, 96, 116, 26, ID_CIKIS, fn);
+    CheckDlgButton(g_pen, ID_GIZLE, g_gizle ? BST_CHECKED : BST_UNCHECKED);
+    kontrol(L"STATIC", L"", 0, 14, 132, 732, 196, ID_DURUM, fm);
+    kontrol(L"STATIC", L"En iyi seed'ler  (sn = tahmini yol süresi, düşük = iyi; kopyalanabilir)", 0, 14, 336, 732, 20, 0, fn);
+    kontrol(L"EDIT", L"", ES_MULTILINE | ES_READONLY | ES_AUTOHSCROLL | WS_VSCROLL, 14, 358, 732, 300, ID_LISTE, fm);
     dugmeleriAyarla();
     memset(&g_nid, 0, sizeof g_nid);
     g_nid.cbSize = sizeof g_nid;
@@ -1246,7 +1266,7 @@ static int guiCalistir(int gizli)
     g_nid.uCallbackMessage = WM_TEPSI;
     g_nid.hIcon = LoadIcon(NULL, IDI_APPLICATION);
     lstrcpyW(g_nid.szTip, L"FastAuto Seed Avcısı");
-    Shell_NotifyIconW(NIM_ADD, &g_nid);
+    if (!g_gizle) Shell_NotifyIconW(NIM_ADD, &g_nid);
     int hazir = pc >= 1 && toplam >= 1 && pc <= toplam;
     if (!(gizli && hazir)) ShowWindow(g_pen, SW_SHOW);  /* ayar yoksa gizli başlamanın anlamı yok */
     if (hazir) guiBaslat();
