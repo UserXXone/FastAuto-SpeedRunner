@@ -111,12 +111,16 @@ function servisDurumu (ad = SERVIS) {
 }
 
 // Bot koşusu da geçici bir systemd birimi. Durdurulunca (SIGTERM) sunucusunu kapatır.
-function kosuBaslat (seed) {
+const KOSU_HEDEF = ['nether', 'blaze', 'pearl', 'kale']
+const KOSU_BASLA = ['bastan', 'portal', 'dokum', 'kale']
+function kosuBaslat (seed, hedef = 'blaze', basla = 'bastan') {
+  const ek = ['--hedef', hedef]
+  if (basla !== 'bastan') ek.push('--basla', basla)
   return new Promise((resolve, reject) => {
     execFile('systemd-run', [
       `--unit=${KOSU_BIRIM}`, '--collect', '--quiet',
       `--property=WorkingDirectory=${KOK}`, '--property=TimeoutStopSec=30',
-      process.execPath, path.join(KOK, 'src', 'index.js'), 'nether', '--seed', seed
+      process.execPath, path.join(KOK, 'src', 'index.js'), 'nether', '--seed', seed, ...ek
     ], { timeout: 15000 }, (err, out, hata) => (err ? reject(new Error(String(hata || err.message))) : resolve()))
   })
 }
@@ -229,6 +233,22 @@ function zipYap (dosyalar) {
   return Buffer.concat([...parca, md, son])
 }
 
+// Dağıtılan exe: sürüm numarası dosyanın içindeki "FASTAUTO-SURUM:N:" işaretinden okunur.
+let exeOnbellek = null
+function exeBilgisi () {
+  const yol = path.join(DAGITIM_DIZIN, 'seed-avcisi.exe')
+  try {
+    const st = fs.statSync(yol)
+    if (exeOnbellek && exeOnbellek.mtime === st.mtimeMs) return exeOnbellek
+    const veri = fs.readFileSync(yol)
+    const m = /FASTAUTO-SURUM:(\d+):/.exec(veri.toString('latin1'))
+    exeOnbellek = { mtime: st.mtimeMs, veri, surum: m ? Number(m[1]) : 1, sha256: crypto.createHash('sha256').update(veri).digest('hex') }
+    return exeOnbellek
+  } catch {
+    return null
+  }
+}
+
 function windowsPaketi (ayar) {
   const crlf = (x) => Buffer.from(x.replace(/\r?\n/g, '\r\n'))
   return zipYap([
@@ -240,13 +260,16 @@ function windowsPaketi (ayar) {
       veri: crlf(`FastAuto Seed Avcisi - Windows paketi
 
 1. Bu klasoru masaustune cikar (zip icinden calistirma).
-2. baslat.bat'a cift tikla.
-3. Ilk seferde iki soru sorar:
-   - Bu bilgisayarin numarasi: her PC'ye farkli numara (1, 2, 3, 4, 5).
+2. seed-avcisi.exe'ye (ya da baslat.bat'a) cift tikla: bir pencere acilir.
+3. Ilk seferde iki kutuyu doldur, "Baslat"a bas:
+   - Bilgisayar no: her PC'ye farkli numara (1, 2, 3, 4, 5).
      VDS 6 numarali, onu kullanma.
-   - Toplam kac bilgisayar: hepsinde ayni sayi (6).
+   - Toplam PC: hepsinde ayni sayi (6).
+   Sonraki acilislarda kendiliginden baslar.
 4. Sonuclar 30 saniyede bir ${PANEL_URL} paneline otomatik gider.
-   Ekranda "Panele yukleme: tamam" yazmali.
+   Pencerede "Panele yukleme: tamam" yazmali.
+5. Program yeni surumu panelden kendisi indirir ve yeniden baslar
+   ("Otomatik guncelle" kutusu isaretliyken).
 
 panel.txt gizli yukleme anahtarini icerir, kimseyle paylasma.
 `)
@@ -299,8 +322,26 @@ function panelSayfasi () {
     <th>#</th><th>Seed</th><th>Gerçek</th><th>Yol puanı</th><th>Portal</th><th>Sandık</th><th>Ağaç</th><th>Nether yolu</th><th>Bot</th><th>Notlar</th>
   </tr></thead><tbody></tbody></table></div>
 
-  <h2>Bot koşusu <span class="soluk">(şimdilik: doğma noktasından Nether'a giriş)</span></h2>
+  <h2>Bot koşusu <span class="soluk">(Faz 3: Nether → blaze → ender gözü → kale)</span></h2>
   <div class="kart">
+    <div class="kontrol">
+      <label>Hedef
+        <select id="kHedef">
+          <option value="nether">Nether'a giriş</option>
+          <option value="blaze" selected>Blaze çubukları</option>
+          <option value="pearl">Ender gözleri (deneysel)</option>
+          <option value="kale">End portalını aç (deneysel)</option>
+        </select>
+      </label>
+      <label>Başlangıç
+        <select id="kBasla">
+          <option value="bastan" selected>Baştan (gerçek koşu)</option>
+          <option value="portal">Test: portalın yanında, aletlerle</option>
+          <option value="dokum">Test: portal + kova (obsidyen dökme)</option>
+          <option value="kale">Test: kalenin üstünde, 12 gözle</option>
+        </select>
+      </label>
+    </div>
     <div class="kontrol">
       <span id="kBilgi">Koşu yok.</span>
       <button id="kDurdur" type="button" class="ikincil" disabled>Koşuyu durdur</button>
@@ -394,6 +435,20 @@ async function istek (req, res) {
       Location: '/',
       'Set-Cookie': `seed_oturum=${oturumOlustur(ayar)}; Path=/; Max-Age=${OTURUM_GUN * 86400}; HttpOnly; Secure; SameSite=Strict`
     })
+  }
+
+  // Seed avcısının otomatik güncellemesi: aynı yükleme anahtarıyla.
+  if ((url.pathname === '/api/surum' || url.pathname === '/api/exe') && req.method === 'GET') {
+    const ip = istemciIp(req)
+    if (engelliMi(ip)) return gonder(res, 429, 'text/plain; charset=utf-8', 'Çok fazla hatalı deneme')
+    if (!anahtarDogru(ayar, req.headers['x-yukleme-anahtari'])) {
+      hataKaydet(ip)
+      return gonder(res, 401, 'text/plain; charset=utf-8', 'Anahtar yanlış')
+    }
+    const e = exeBilgisi()
+    if (!e) return gonder(res, 404, 'text/plain; charset=utf-8', 'Paket yok')
+    if (url.pathname === '/api/surum') return gonder(res, 200, 'application/json; charset=utf-8', JSON.stringify({ surum: e.surum, sha256: e.sha256, boyut: e.veri.length }))
+    return gonder(res, 200, 'application/octet-stream', e.veri)
   }
 
   if (url.pathname === '/api/yukle' && req.method === 'POST') {
@@ -496,7 +551,9 @@ async function istek (req, res) {
         if (!SEED_RE.test(seed)) return gonder(res, 400, 'text/plain; charset=utf-8', 'Hatalı seed')
         if (aktif) return gonder(res, 409, 'text/plain; charset=utf-8', 'Zaten bir koşu sürüyor')
         if ((await servisDurumu(DOGRULAMA_BIRIM)) === 'active') return gonder(res, 409, 'text/plain; charset=utf-8', 'Doğrulama sürüyor; önce onu durdur (ikisine birden RAM yetmez)')
-        await kosuBaslat(seed)
+        const hedef = KOSU_HEDEF.includes(g.hedef) ? g.hedef : 'blaze'
+        const basla = KOSU_BASLA.includes(g.basla) ? g.basla : 'bastan'
+        await kosuBaslat(seed, hedef, basla)
       } else if (g.eylem === 'durdur') {
         if (aktif) execFile('systemctl', ['stop', KOSU_BIRIM], { timeout: 60000 }, () => {})
       } else {

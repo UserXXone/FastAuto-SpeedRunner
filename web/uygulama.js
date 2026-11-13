@@ -124,6 +124,8 @@ $('#kDurdur') && $('#kDurdur').addEventListener('click', () => kosuIstek({ eylem
 const dk = (ms) => { const s = Math.floor(ms / 1000); return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}` }
 let mesgul = false  // koşu ya da doğrulama sürüyor
 
+const HEDEF_AD = { nether: 'Nether\'a girdi', blaze: 'Blaze çubukları', pearl: 'Ender gözleri', kale: 'End portalı açıldı' }
+
 function kosuCiz (k) {
   if (!k || !$('#kosular')) return
   const du = k.durum
@@ -148,8 +150,8 @@ function kosuCiz (k) {
     const td = (x, c) => { const t = el('td', c || null); typeof x === 'string' ? (t.textContent = x) : t.append(x); return t }
     const asamalar = (r.asamalar || []).map((a) => `${a.name} ${dk(a.total)}`).join(' → ')
     tr.append(td(new Date(r.zaman * 1000).toLocaleString('tr-TR')), td(seedDugmesi(r.seed)),
-      td(r.basarili ? '✓ Nether\'a girdi' : `✗ ${r.hata || 'yarıda kaldı'}`, r.basarili ? 'vurgu' : 'hata'),
-      td(r.sureMs ? dk(r.sureMs) : '—'), td(asamalar + (r.basla === 'portal' ? ' (test: portaldan başladı)' : ''), 'not'))
+      td(r.basarili ? `✓ ${HEDEF_AD[r.hedef] || 'bitti'}` : `✗ ${r.hata || 'yarıda kaldı'}`, r.basarili ? 'vurgu' : 'hata'),
+      td(r.sureMs ? dk(r.sureMs) : '—'), td(asamalar + (r.basla && r.basla !== 'bastan' ? ` (test: ${r.basla})` : ''), 'not'))
     return tr
   })
   if (!satirlar.length) {
@@ -163,7 +165,7 @@ function kosDugmesi (r) {
   const b = el('button', 'kos', 'Koş')
   b.disabled = mesgul
   b.title = 'Botu bu seed\'de koştur'
-  b.addEventListener('click', () => { b.disabled = true; kosuIstek({ eylem: 'baslat', seed: r.seed }) })
+  b.addEventListener('click', () => { b.disabled = true; kosuIstek({ eylem: 'baslat', seed: r.seed, hedef: $('#kHedef').value, basla: $('#kBasla').value }) })
   return b
 }
 

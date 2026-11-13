@@ -10,7 +10,7 @@ FLAGS  = -O3 -fwrapv -I$(CUB) -Wall -Wno-unused-function
 
 WINCC  = x86_64-w64-mingw32-gcc
 # Windows 7 (0x0601) API seviyesi, tek dosya (static) exe: başka DLL gerekmez.
-WINFLAGS = -D_WIN32_WINNT=0x0601 -static -static-libgcc
+WINFLAGS = -D_WIN32_WINNT=0x0601 -static -static-libgcc -mwindows -finput-charset=UTF-8
 
 .PHONY: all linux windows hepsi temizle
 
@@ -26,7 +26,7 @@ bin/seed-avcisi: $(SRC)
 
 bin/seed-avcisi.exe: $(SRC)
 	mkdir -p bin
-	$(WINCC) $(FLAGS) $(WINFLAGS) -march=x86-64 -o $@ $(SRC) -lm -lwininet
+	$(WINCC) $(FLAGS) $(WINFLAGS) -march=x86-64 -o $@ $(SRC) -lm -lwininet -ladvapi32 -lgdi32
 
 temizle:
 	rm -rf bin
