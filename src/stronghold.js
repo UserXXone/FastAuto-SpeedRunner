@@ -99,29 +99,33 @@ async function locatePortalRoom(bot, kale, say = () => {}) {
 const isAirName = (b) => Boolean(b && b.boundingBox === "empty" && !["lava", "water"].includes(b.name));
 const isLavaB = (b) => Boolean(b && b.name === "lava");
 
-// Halkanın ortası (3x3) altı lavlı bir çukur: orada ASLA durma. Göz takmak için
-// çerçeve yüksekliğinde, halkanın DIŞINDA hücreler. Zemini sağlamsa maliyet 0;
-// boş ya da lavsa (çerçeveler lav havuzunun kıyısında olabilir) otoyol zemini kendisi
-// kurar, maliyet 3. Ayak/baş hücresi lav olamaz; sağlam blok ise kazılır.
+// Gerçek yerleşim (1.21.1 portal odası, ölçülerek bakıldı): çerçeveler havada, oda
+// zemininin ~2-3 blok üstünde; ortada 3x3 lav çukuru. Bot oda zemininde ya da
+// basamaklarda, halkanın 5x5 sütununun DIŞINDA durmalı. Çerçeveye mesafe yeter
+// (göz ~1,6 blok altında). Zemini sağlam, ayak/baş açık ve yanında lav olmayan hücreler.
 function standCells(bot, room) {
   const c = room.center;
   const out = [];
   const hard = (b) => b && (b.name === "bedrock" || b.name === "end_portal_frame" || b.name === "spawner");
-  for (let dx = -5; dx <= 5; dx++)
-    for (let dz = -5; dz <= 5; dz++) {
-      if (Math.abs(dx) <= 2 && Math.abs(dz) <= 2 && !(Math.abs(dx) === 2 && Math.abs(dz) === 2)) continue; // halka + içi
-      const cell = new Vec3(Math.floor(c.x) + dx, c.y, Math.floor(c.z) + dz);
-      const floor = bot.blockAt(cell.offset(0, -1, 0));
-      const feet = bot.blockAt(cell);
-      const head = bot.blockAt(cell.offset(0, 1, 0));
-      if (!floor || !feet || !head || hard(feet) || hard(head) || hard(floor)) continue;
-      if (isLavaB(feet) || isLavaB(head) || feet.name === "water" || head.name === "water") continue;
-      let cost = floor.boundingBox === "block" && floor.name !== "magma_block" ? 0 : 3;
-      if (feet.boundingBox === "block") cost += 1;
-      if (head.boundingBox === "block") cost += 1;
-      cell.cost = cost;
-      out.push(cell);
-    }
+  for (let dy = -3; dy <= 1; dy++)
+    for (let dx = -6; dx <= 6; dx++)
+      for (let dz = -6; dz <= 6; dz++) {
+        if (Math.abs(dx) <= 2 && Math.abs(dz) <= 2) continue; // halkanın 5x5 sütunu: içi lav çukuru
+        const cell = new Vec3(Math.floor(c.x) + dx, c.y + dy, Math.floor(c.z) + dz);
+        const floor = bot.blockAt(cell.offset(0, -1, 0));
+        const feet = bot.blockAt(cell);
+        const head = bot.blockAt(cell.offset(0, 1, 0));
+        if (!floor || !feet || !head || hard(feet) || hard(head)) continue;
+        if (floor.boundingBox !== "block" || floor.name === "magma_block" || floor.name.startsWith("infested")) continue;
+        if (!isAirName(feet) || !isAirName(head)) continue;
+        let lav = false;
+        for (const [ax, az] of [[1, 0], [-1, 0], [0, 1], [0, -1], [0, 0]]) {
+          for (const ay of [0, -1]) if (isLavaB(bot.blockAt(cell.offset(ax, ay, az)))) lav = true;
+        }
+        if (lav) continue;
+        cell.cost = 0;
+        out.push(cell);
+      }
   return out;
 }
 
@@ -156,7 +160,7 @@ async function tunnelToRoom(bot, room, say = () => {}) {
     r = await H.highway(bot, T, { maxMs: 90000 });
     A.dbg("duruş noktası:", r, H.cellOf(bot).toString());
     const c = H.cellOf(bot);
-    if (c.y === room.center.y && !isLavaB(bot.blockAt(c.offset(0, -1, 0)))) return c;
+    if (c.equals(T) || (Math.abs(c.y - T.y) === 0 && Math.hypot(c.x - T.x, c.z - T.z) <= 1.5)) return c;
   }
   return null;
 }
@@ -195,7 +199,7 @@ async function moveNear(bot, room, frame) {
   const r = await H.highway(bot, best, { maxMs: 60000 });
   A.dbg("çerçeveye yaklaşma:", r, H.cellOf(bot).toString());
   const now = H.cellOf(bot);
-  return now.y === room.center.y && reachOf(now, frame) <= 4.2;
+  return reachOf(now, frame) <= 4.2 && !isLavaB(bot.blockAt(now.offset(0, -1, 0)));
 }
 
 /**
@@ -221,4 +225,4 @@ async function fillPortal(bot, room, say = () => {}) {
   return { placed, open: Boolean(mid && mid.name === "end_portal") };
 }
 
-module.exports = { returnToOverworld, findPortalRoom, locatePortalRoom, tunnelToRoom, fillPortal, eyes };
+module.exports = { _standCells: standCells, returnToOverworld, findPortalRoom, locatePortalRoom, tunnelToRoom, fillPortal, eyes };
