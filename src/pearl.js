@@ -149,7 +149,11 @@ async function huntEndermen(bot, need, say, opts = {}) {
           await A.withHand(bot, async () => {
             const w = C.bestWeapon(bot);
             if (w && (!bot.heldItem || bot.heldItem.type !== w.type)) await bot.equip(w, "hand");
-            else bot.attack(inReach);
+            else {
+          // İzleyen/yayın için: vurduğumuz yere bak (sunucu için gerekmez).
+          await bot.lookAt(inReach.position.offset(0, (inReach.height || 1) * 0.6, 0), true).catch(() => {});
+          bot.attack(inReach);
+        }
           });
           lastAttack = Date.now();
         }

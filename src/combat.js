@@ -205,7 +205,11 @@ function startGuard(bot, opts = {}) {
             // Kılıcı yeni aldıysak hemen vurma: eşya değişince vuruş gücü sıfırlanır.
             const w = bestWeapon(bot);
             if (w && (!bot.heldItem || bot.heldItem.type !== w.type)) await bot.equip(w, "hand");
-            else bot.attack(target);
+            else {
+          // İzleyen/yayın için: vurduğumuz yere bak (sunucu için gerekmez).
+          await bot.lookAt(target.position.offset(0, (target.height || 1) * 0.6, 0), true).catch(() => {});
+          bot.attack(target);
+        }
           });
           lastAttack = Date.now();
           lastTargetId = target.id;
