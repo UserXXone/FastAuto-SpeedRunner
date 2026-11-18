@@ -331,13 +331,17 @@ async function run(bot, info, opts = {}) {
       await stageTools(bot, timer);
       let meat = await C.huntFood(bot, FOOD_WANTED, { radius: 32, budgetMs: 30000 });
       // Yemeksiz Nether'a girme: can geri dolmaz. Az et varsa etrafı gezip ara (en çok ~2 dk).
-      for (let i = 0; i < 4 && meat < FOOD_MIN; i++) {
+      // Gezerken can 14'ün altına inerse (düşme, zombi) bırak: aç girmek ölmekten iyi.
+      const drop0 = bot.pathfinder.movements.maxDropDown;
+      bot.pathfinder.movements.maxDropDown = 2;
+      for (let i = 0; i < 4 && meat < FOOD_MIN && bot.health >= 14; i++) {
         const me = bot.entity.position;
         const ang = (i * Math.PI) / 2 + Math.random();
         say(`Yemek az (${meat} et), hayvan aranıyor`);
         await A.goto(bot, new GoalNearXZ(Math.round(me.x + Math.cos(ang) * 48), Math.round(me.z + Math.sin(ang) * 48), 4), 25000);
         meat = await C.huntFood(bot, FOOD_WANTED, { radius: 48, budgetMs: 25000 });
       }
+      bot.pathfinder.movements.maxDropDown = drop0;
       timer.split(`Yemek (${meat} et)`);
     }
     await stagePortal(bot, info, timer, say);
