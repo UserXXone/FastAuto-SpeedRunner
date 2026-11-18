@@ -181,7 +181,9 @@ async function netherKosu(args) {
   const cast = args.basla === "dokum";
   const kaleTest = args.basla === "kale"; // doğrudan kale aşaması (12 göz verilir)
   if (kaleTest) args.hedef = "kale";
-  const start = kaleTest ? "kale" : args.basla === "portal" || cast ? "portal" : "bastan";
+  const warpedTest = args.basla === "warped"; // doğrudan enderman avı (Nether'a ışınlar)
+  if (warpedTest && !["pearl", "kale"].includes(args.hedef)) args.hedef = "pearl";
+  const start = kaleTest ? "kale" : warpedTest ? "warped" : args.basla === "portal" || cast ? "portal" : "bastan";
   const external = Boolean(args.host);
   if (!external && (!args.seed || args.seed === true))
     throw new Error("--seed vermelisin. Örnek: npm run nether -- --seed 123");
@@ -281,6 +283,19 @@ async function netherKosu(args) {
         await rcon.komut(`give ${username} ${it}`);
       if (cast) for (const it of ["bucket 2", "flint_and_steel"]) await rcon.komut(`give ${username} ${it}`);
       await sleep(1500);
+    }
+
+    if (warpedTest && rcon) {
+      if (!info.warped) throw new Error("Warped forest bulunamadı");
+      console.log("TEST: Nether'a, warped forest'ın içine ışınlanıyor (gerçek koşu değil).");
+      const [wx, wz] = info.warped;
+      const [px, pz] = [Math.round(info.portal[0] / 8), Math.round(info.portal[1] / 8)];
+      const d = Math.hypot(wx - px, wz - pz) || 1;
+      const tx = Math.round(wx + ((wx - px) / d) * 64), tz = Math.round(wz + ((wz - pz) / d) * 64);
+      for (const it of ["stone_pickaxe", "stone_pickaxe", "stone_pickaxe", "stone_sword", "netherrack 128", "cooked_beef 12", "blaze_rod 6"])
+        await rcon.komut(`give ${username} ${it}`);
+      await rcon.komut(`execute in minecraft:the_nether run spreadplayers ${tx} ${tz} 0 8 under 100 false ${username}`);
+      await sleep(4000);
     }
 
     if (kaleTest && rcon) {

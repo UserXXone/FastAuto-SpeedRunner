@@ -266,7 +266,9 @@ async function stagePearls(bot, info, timer, say, guard) {
   if (!ground) throw new Error("Warped forest zemini bulunamadı");
   say(`Av yeri: ${ground.x}, ${ground.y}, ${ground.z} (48 blokta ${E.openNylium(bot, 48).length} açık nylium)`);
   if (A.count(bot, H.isFiller) < 24) await F.stockScaffold(bot, 64, ground);
-  const r = await H.highway(bot, ground, { maxMs: 240000, enclosed: true, descendEarly: true });
+  const r = await H.highway(bot, ground, { maxMs: 240000, enclosed: true, descendEarly: true, harvest: 96 });
+  // Kapsül ve pencereler için blok lazım (yer değiştirince yeni kapsül ~10 blok).
+  if (A.count(bot, H.isFiller) < 40) await F.stockScaffold(bot, 80);
   A.dbg("av yerine varış:", r, H.cellOf(bot).toString());
   timer.split("Warped forest'a varış");
 
@@ -342,6 +344,12 @@ async function run(bot, info, opts = {}) {
       // Test kısayolu: doğrudan kale aşaması.
       await stageStronghold(bot, info, timer, say, true);
       say(`🟣 End portalı açık. Süre: ${fmt(timer.elapsed())}`);
+      return timer;
+    }
+    if (opts.start === "warped") {
+      // Test kısayolu: doğrudan enderman avı ve göz yapımı.
+      await stagePearls(bot, info, timer, say, guard);
+      say(`🟢 Ender gözleri hazır. Süre: ${fmt(timer.elapsed())}`);
       return timer;
     }
     if (opts.start !== "portal") {

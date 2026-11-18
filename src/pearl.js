@@ -92,12 +92,30 @@ async function sealCapsule(bot) {
 }
 
 // Pencereyi aç, endermanın gözüne bak, pencereyi kapat.
-async function lure(bot, target) {
+// Gözümüzden endermanın gözüne giden ışın: önündeki ilk sağlam blok (kendi
+// kapsülümüzün duvarı olmalı) dışında açık mı? Açıksa o duvar bloğu "pencere".
+// Enderman sadece onu gerçekten görebiliyorsak kızar (sunucu görüş hattına bakar).
+function windowFor(bot, target) {
   const c = H.cellOf(bot);
-  const dx = target.position.x - (c.x + 0.5);
-  const dz = target.position.z - (c.z + 0.5);
-  const side = Math.abs(dx) >= Math.abs(dz) ? [Math.sign(dx) || 1, 0] : [0, Math.sign(dz) || 1];
-  const win = c.offset(side[0], 1, side[1]);
+  const eye = bot.entity.position.offset(0, bot.entity.eyeHeight || 1.62, 0);
+  const to = target.position.offset(0, ENDERMAN_EYE, 0);
+  const dist = eye.distanceTo(to);
+  if (dist > 60) return null;
+  const dir = to.minus(eye).normalize();
+  const shell = [c.offset(0, 2, 0)];
+  for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) shell.push(c.offset(dx, 1, dz));
+  const solid = (b) => b && b.boundingBox === "block";
+  const first = bot.world.raycast(eye, dir, dist, solid);
+  if (!first) return null; // kapsül açık? (olmamalı)
+  const win = shell.find((p) => p.equals(first.position));
+  if (!win) return null;
+  const past = bot.world.raycast(eye, dir, dist, (b) => solid(b) && !b.position.equals(win));
+  return past ? null : win;
+}
+
+async function lure(bot, target) {
+  const win = windowFor(bot, target);
+  if (!win) return false;
   const b = bot.blockAt(win);
   if (b && b.boundingBox === "block") {
     try {
@@ -108,15 +126,16 @@ async function lure(bot, target) {
       });
     } catch (err) {
       A.dbg("pencere açılamadı:", err.message);
-      return;
+      return false;
     }
   }
   const t0 = Date.now();
-  while (Date.now() - t0 < 900 && bot.entities[target.id]) {
+  while (Date.now() - t0 < 1200 && bot.entities[target.id]) {
     await bot.lookAt(target.position.offset(0, ENDERMAN_EYE, 0), true);
     await A.sleep(50);
   }
   await H.placeFiller(bot, win);
+  return true;
 }
 
 /**
@@ -132,6 +151,8 @@ async function huntEndermen(bot, need, say, opts = {}) {
   let lastCount = pearls(bot);
   let kills = 0;
   const hit = new Set();
+  const lured = new Map(); // id -> kızdırma zamanı
+  let lastSuccess = Date.now();
   const onGone = (e) => {
     if (hit.delete(e.id)) kills++;
   };
@@ -148,7 +169,7 @@ async function huntEndermen(bot, need, say, opts = {}) {
         lastCount = pearls(bot);
         say(`  ender pearl ${lastCount}/${need}`);
       }
-      const near = endermen(bot, 48);
+      const near = endermen(bot, 64);
       const inReach = near.find((e) => C.reachDistance(bot, e) <= 3.0);
       if (Date.now() - lastLog > 10000) {
         lastLog = Date.now();
@@ -180,13 +201,18 @@ async function huntEndermen(bot, need, say, opts = {}) {
           const r = await H.highway(bot, cell, { enclosed: true, maxMs: 20000 });
           A.dbg("pearl'e kapsülle gidildi:", r);
           await sealCapsule(bot);
-        } else if (near.length && Date.now() - lastLure > 6000) {
+        } else if (near.length && Date.now() - lastLure > 6000 && Date.now() - lastSuccess <= 45000) {
           // Kızdıracak enderman: bize yakın ve aşağı yukarı aynı yükseklikte olan.
-          const me = bot.entity.position;
-          const target = near.find((e) => Math.abs(e.position.y - me.y) <= 6 && e.position.distanceTo(me) >= 3);
-          if (target) await lure(bot, target);
-          lastLure = Date.now();
-        } else if (!near.length && Date.now() - lastLure > 30000) {
+          // Kızdıracak enderman: kapsülün bir duvar bloğunu açınca görülebilen.
+          const target = near.find((e) => e.position.distanceTo(bot.entity.position) >= 3 && !(Date.now() - (lured.get(e.id) || 0) < 20000) && windowFor(bot, e));
+          if (target && (await lure(bot, target))) {
+            lured.set(target.id, Date.now());
+            lastSuccess = Date.now();
+            A.dbg("enderman kızdırıldı:", target.position.distanceTo(bot.entity.position).toFixed(1), "blok");
+            lastLure = Date.now();
+          } else lastLure = Date.now() - 4000; // görülen yok: 2 sn sonra tekrar bak
+        } else if ((!near.length && Date.now() - lastLure > 30000) || Date.now() - lastSuccess > 45000) {
+          lastSuccess = Date.now();
           // Görünürde enderman yok: biraz yer değiştir.
           lastLure = Date.now();
           const c = H.cellOf(bot);
