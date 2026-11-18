@@ -188,6 +188,7 @@ async function walkInto(bot, to, jump) {
 // ön) blokla kapat. Böylece açık havada bile kapalı bir tüpün içinde ilerleriz:
 // hiçbir yaratık bizi göremez, vuramaz, köprüden itemez.
 async function step(bot, from, to, enclosed = false) {
+  const t0 = Date.now();
   const corridor = [to, to.offset(0, 1, 0)];
   if (to.y > from.y) corridor.push(from.offset(0, 2, 0)); // zıplarken başımız çarpmasın
   if (to.y < from.y) corridor.push(to.offset(0, 2, 0));
@@ -206,6 +207,7 @@ async function step(bot, from, to, enclosed = false) {
     if (shell.some((n) => !bot.blockAt(n))) return false;
     await placeMany(bot, shell);
   }
+  const t1 = Date.now();
   for (const c of corridor) {
     if (!(await clearCell(bot, c, keep))) return false;
   }
@@ -213,7 +215,14 @@ async function step(bot, from, to, enclosed = false) {
   if (!isSolid(bot.blockAt(floor))) {
     if (!(await placeFiller(bot, floor))) return false;
   }
-  return walkInto(bot, to, to.y > from.y);
+  const t2 = Date.now();
+  const ok = await walkInto(bot, to, to.y > from.y);
+  const t3 = Date.now();
+  if (t3 - t0 > 2500) {
+    const names = corridor.map((c) => (bot.blockAt(c) || {}).name).join("/");
+    A.dbg(`yavaş adım ${to}: duvar ${t1 - t0} kaz ${t2 - t1} yürü ${t3 - t2} ms (${names}) tehdit ${C.rangedThreat(bot) ? C.rangedThreat(bot).name : "-"}`);
+  }
+  return ok;
 }
 
 // Olduğun yerde bir blok yüksel (zıpla, altına blok koy).
