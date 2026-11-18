@@ -77,7 +77,18 @@ function findWarpedGround(bot, maxDistance = 96, minOpen = 0) {
 
 // Etrafımız kapalı mı? Değilse kapat (kapsül: ayak ve baş hizasında dört yan + tavan + zemin).
 async function sealCapsule(bot) {
+  // Bloğun ortasında dur: kenardaysak gövdemiz komşu hücreye taşar, sunucu oraya
+  // blok koymayı reddeder ve kapsül açık kalır (enderman vuruyor: can 0,2'ye indi).
+  for (let i = 0; i < 20 && !bot.entity.onGround; i++) await A.sleep(50);
   const c = H.cellOf(bot);
+  const mid = c.offset(0.5, 0, 0.5);
+  for (let i = 0; i < 12 && Math.hypot(bot.entity.position.x - mid.x, bot.entity.position.z - mid.z) > 0.12; i++) {
+    await bot.lookAt(new Vec3(mid.x, bot.entity.position.y + 1.62, mid.z), true);
+    bot.setControlState("forward", true);
+    await A.sleep(50);
+  }
+  bot.setControlState("forward", false);
+  await A.sleep(100);
   const shell = [c.offset(0, -1, 0), c.offset(0, 2, 0)];
   for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
     shell.push(c.offset(dx, 0, dz), c.offset(dx, 1, dz));
@@ -89,6 +100,7 @@ async function sealCapsule(bot) {
       if (!(await H.placeFiller(bot, p))) open++;
     }
   }
+  if (open) A.dbg("kapsül kapanmadı:", open, "açık", c.toString());
   return open === 0;
 }
 
@@ -217,7 +229,13 @@ async function huntEndermen(bot, need, say, opts = {}) {
           // Kızdıracak enderman: bize yakın ve aşağı yukarı aynı yükseklikte olan.
           // Kızdıracak enderman: kapsülün bir duvar bloğunu açınca görülebilen.
           const target = near.find((e) => e.position.distanceTo(bot.entity.position) >= 3 && !(Date.now() - (lured.get(e.id) || 0) < 20000) && windowFor(bot, e));
-          if (target && (await lure(bot, target))) {
+          if (target && !(await sealCapsule(bot))) {
+            // Kapsül kapanmıyor: bir yana kay, sonra tekrar dene.
+            const c = H.cellOf(bot);
+            await A.goto(bot, new GoalNearXZ(c.x + (Math.random() < 0.5 ? 2 : -2), c.z + (Math.random() < 0.5 ? 2 : -2), 0), 8000);
+            await sealCapsule(bot);
+            lastLure = Date.now() - 4000;
+          } else if (target && (await lure(bot, target))) {
             lured.set(target.id, Date.now());
             lastSuccess = Date.now();
             A.dbg("enderman kızdırıldı:", target.position.distanceTo(bot.entity.position).toFixed(1), "blok");
