@@ -148,6 +148,33 @@ function watchHealth(bot) {
   });
 }
 
+// İzleyiciler (sunucuya giren diğer oyuncular): izleyici moduna al, bot boyut
+// değiştirince (portal) peşinden ışınla.
+function izleyiciTakip(bot, rcon, botAd) {
+  const bilinen = new Map(); // ad -> son boyut
+  const t = setInterval(async () => {
+    try {
+      const m = /online: (.*)$/.exec(await rcon.komut("list"));
+      const adlar = m ? m[1].split(",").map((x) => x.trim()).filter((x) => x && x !== botAd) : [];
+      const boyut = bot.game && bot.game.dimension;
+      for (const ad of adlar) {
+        if (!bilinen.has(ad)) {
+          await rcon.komut(`gamemode spectator ${ad}`);
+          await rcon.komut(`tp ${ad} ${botAd}`);
+          bilinen.set(ad, boyut);
+          continue;
+        }
+        if (bilinen.get(ad) !== boyut) {
+          await rcon.komut(`tp ${ad} ${botAd}`);
+          bilinen.set(ad, boyut);
+        }
+      }
+      for (const ad of [...bilinen.keys()]) if (!adlar.includes(ad)) bilinen.delete(ad);
+    } catch (e) { /* sunucu kapanıyor olabilir */ }
+  }, 3000);
+  bot.once("end", () => clearInterval(t));
+}
+
 async function netherKosu(args) {
   const username = args.username || "Speedrunner";
   // Test kısayolları: "portal" alet aşamasını atlar; "dokum" ayrıca iki kova ve çakmak verir.
@@ -238,6 +265,7 @@ async function netherKosu(args) {
     await c.spawned;
     console.log(`Bağlandı (Minecraft ${bot.version}).`);
     watchHealth(bot);
+    if (rcon) izleyiciTakip(bot, rcon, username);
     const failed = new Promise((_, reject) => {
       bot.once("death", () => reject(new Error("Bot öldü")));
       bot.once("end", (r) => reject(new Error("Bağlantı koptu: " + r)));
