@@ -12,7 +12,7 @@ const { clusters, cost, center } = require("./planner");
 
 const STONE_BLOCKS = ["stone", "deepslate", "cobblestone", "cobbled_deepslate"];
 const IRON_ORES = ["iron_ore", "deepslate_iron_ore"];
-const PICKAXES_WANTED = 4; // taş kazma 131 blokta kırılır; tünel + blok toplama ~400 blok
+const PICKAXES_WANTED = 9; // Nether tünelleri (spawner, warped, dönüş) ~1000+ blok; taş kazma 131 blok
 
 const has = (bot, name) => A.count(bot, name) > 0;
 const pickaxes = (bot) => A.count(bot, (i) => i.name.endsWith("_pickaxe"));

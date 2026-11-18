@@ -23,8 +23,8 @@ const { scanLoaded } = require("./scanner");
 const { makePlan } = require("./planner");
 const { Timer, fmt } = require("./timer");
 
-const LOGS_NEEDED = 10; // aletler, 4 kazmanın çubukları, fırın yakıtı, yedek
-const COBBLE_NEEDED = 16; // kazma 3 + kılıç 2 + 3 yedek kazma 9 + yedek
+const LOGS_NEEDED = 12; // aletler, 9 kazmanın çubukları, fırın yakıtı, yedek
+const COBBLE_NEEDED = 32; // kazma 3 + kılıç 2 + 8 yedek kazma 24 + yedek
 const RODS_NEEDED = 6; // 12 göz için 12 toz = 6 çubuk (kalenin yeri belli, göz atmıyoruz)
 const FOOD_WANTED = 6;
 const FOOD_MIN = 3; // bundan azsa Nether'a girmeden önce hayvan ara
