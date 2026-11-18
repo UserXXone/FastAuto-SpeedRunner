@@ -138,6 +138,7 @@ function kosuBaslat (seed, hedef = 'blaze', basla = 'bastan') {
     execFile('systemd-run', [
       `--unit=${KOSU_BIRIM}`, '--collect', '--quiet',
       `--property=WorkingDirectory=${KOK}`, '--property=TimeoutStopSec=30',
+      '--setenv=DEBUG=1', `--property=StandardOutput=truncate:${path.join(KOK, 'kosu', 'veri', 'son-kosu.log')}`, '--property=StandardError=inherit',
       process.execPath, path.join(KOK, 'src', 'index.js'), 'nether', '--seed', seed, ...ek
     ], { timeout: 15000 }, (err, out, hata) => (err ? reject(new Error(String(hata || err.message))) : resolve()))
   })
