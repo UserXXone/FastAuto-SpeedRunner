@@ -237,7 +237,10 @@ async function stagePearls(bot, info, timer, say, guard) {
     if (!info.warped) throw new Error("Warped forest'ın yeri bilinmiyor (yakında da görünmüyor)");
     const [wx, wz] = info.warped;
     say(`Warped forest'a gidiyorum (${wx}, ${wz})`);
-    if (A.count(bot, H.isFiller) < 96) await F.stockScaffold(bot, 160, { x: wx, z: wz });
+    // Çiftlikten açık tünel kazarak blok toplamak botu kale koridoruna çıkarıyordu
+    // (blaze ateşi, wither iskeleti: ölüm). Kapalı otoyol kazdıkça blok topluyor;
+    // sadece gerçekten azsa stokla.
+    if (A.count(bot, H.isFiller) < 40) await F.stockScaffold(bot, 120, { x: wx, z: wz });
     const r = await H.highway(bot, { x: wx, y: null, z: wz }, {
       range: 8, maxMs: 420000, enclosed: true, until: () => Boolean((ground = E.findWarpedGround(bot, 40))),
     });
@@ -245,7 +248,7 @@ async function stagePearls(bot, info, timer, say, guard) {
     ground = ground || E.findWarpedGround(bot);
   }
   if (!ground) throw new Error("Warped forest zemini bulunamadı");
-  if (A.count(bot, H.isFiller) < 48) await F.stockScaffold(bot, 96, ground);
+  if (A.count(bot, H.isFiller) < 24) await F.stockScaffold(bot, 64, ground);
   const r = await H.highway(bot, ground, { maxMs: 240000, enclosed: true, descendEarly: true });
   A.dbg("av yerine varış:", r, H.cellOf(bot).toString());
   timer.split("Warped forest'a varış");
