@@ -232,22 +232,28 @@ async function stageFortress(bot, info, timer, say, guard) {
 
 // Warped forest'a kapalı tünelle git, enderman avla, ender gözlerini yap.
 async function stagePearls(bot, info, timer, say, guard) {
-  let ground = E.findWarpedGround(bot);
-  if (!ground) {
+  // Ormanın içi: 48 blok içinde en az 600 açık nylium (kenarda ~25, içeride ~2500).
+  const DENSE = 600;
+  const dense = () => E.openNylium(bot, 48).length >= DENSE;
+  if (!dense()) {
     if (!info.warped) throw new Error("Warped forest'ın yeri bilinmiyor (yakında da görünmüyor)");
+    // /locate en yakın kenarı verir; ormanın içine girmek için aynı yönde 64 blok daha ilerle.
     const [wx, wz] = info.warped;
-    say(`Warped forest'a gidiyorum (${wx}, ${wz})`);
-    // Çiftlikten açık tünel kazarak blok toplamak botu kale koridoruna çıkarıyordu
-    // (blaze ateşi, wither iskeleti: ölüm). Kapalı otoyol kazdıkça blok topluyor;
-    // sadece gerçekten azsa stokla.
-    if (A.count(bot, H.isFiller) < 40) await F.stockScaffold(bot, 120, { x: wx, z: wz });
-    const r = await H.highway(bot, { x: wx, y: null, z: wz }, {
-      range: 8, maxMs: 420000, enclosed: true, until: () => Boolean((ground = E.findWarpedGround(bot, 40))),
+    const me = bot.entity.position;
+    const d = Math.hypot(wx - me.x, wz - me.z) || 1;
+    const tx = Math.round(wx + ((wx - me.x) / d) * 64);
+    const tz = Math.round(wz + ((wz - me.z) / d) * 64);
+    say(`Warped forest'a gidiyorum (${wx}, ${wz} → ${tx}, ${tz})`);
+    if (A.count(bot, H.isFiller) < 40) await F.stockScaffold(bot, 120, { x: tx, z: tz });
+    let n = 0;
+    const r = await H.highway(bot, { x: tx, y: null, z: tz }, {
+      range: 8, maxMs: 600000, enclosed: true, until: () => (++n % 20 === 0 ? dense() : false),
     });
-    A.dbg("warped otoyolu:", r);
-    ground = ground || E.findWarpedGround(bot);
+    A.dbg("warped otoyolu:", r, "açık nylium", E.openNylium(bot, 48).length);
   }
+  const ground = E.findWarpedGround(bot, 64);
   if (!ground) throw new Error("Warped forest zemini bulunamadı");
+  say(`Av yeri: ${ground.x}, ${ground.y}, ${ground.z} (48 blokta ${E.openNylium(bot, 48).length} açık nylium)`);
   if (A.count(bot, H.isFiller) < 24) await F.stockScaffold(bot, 64, ground);
   const r = await H.highway(bot, ground, { maxMs: 240000, enclosed: true, descendEarly: true });
   A.dbg("av yerine varış:", r, H.cellOf(bot).toString());

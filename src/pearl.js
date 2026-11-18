@@ -43,21 +43,35 @@ function pearlDrops(bot, range) {
     .sort((a, b) => a.position.distanceTo(me) - b.position.distanceTo(me));
 }
 
-// Yüklü chunk'larda warped forest zemini (warped_nylium) var mı? En yakınının üstü.
-function findWarpedGround(bot, maxDistance = 96) {
+// Yüklü chunk'larda warped forest'ın İÇİ: üstü açık nylium'un en yoğun olduğu yer.
+// İlk bulunan nylium çoğu zaman ormanın kenarıdır (ölçüldü: kenarda 1 dakikada 0
+// enderman, 80 blok içeride 15-18). minOpen: bu kadar açık nylium yoksa null.
+function openNylium(bot, maxDistance) {
   const id = bot.registry.blocksByName.warped_nylium.id;
+  return bot.findBlocks({ matching: id, maxDistance, count: 3000 }).filter((p) => {
+    // Endermanın sığacağı açıklık: üstünde 3 blok boşluk.
+    return [1, 2, 3].every((d) => {
+      const x = bot.blockAt(p.offset(0, d, 0));
+      return x && x.boundingBox === "empty" && x.name !== "lava";
+    });
+  });
+}
+
+function findWarpedGround(bot, maxDistance = 96, minOpen = 0) {
+  const spots = openNylium(bot, maxDistance);
+  if (spots.length < Math.max(1, minOpen)) return null;
+  // Her aday için 16 blok içindeki açık nylium sayısı; en yoğun olana yakın ve yerden çok yüksek olmayanı seç.
   const me = bot.entity.position;
-  const spots = bot
-    .findBlocks({ matching: id, maxDistance, count: 200 })
-    .filter((p) => {
-      const a = bot.blockAt(p.offset(0, 1, 0));
-      const b = bot.blockAt(p.offset(0, 2, 0));
-      const c = bot.blockAt(p.offset(0, 3, 0));
-      // Endermanın sığacağı açıklık: üstünde 3 blok boşluk.
-      return [a, b, c].every((x) => x && x.boundingBox === "empty" && x.name !== "lava");
-    })
-    .sort((a, b) => a.distanceTo(me) - b.distanceTo(me));
-  return spots.length ? spots[0].offset(0, 1, 0) : null;
+  let best = null;
+  let bestScore = -Infinity;
+  const sample = spots.length > 400 ? spots.filter((_, i) => i % Math.ceil(spots.length / 400) === 0) : spots;
+  for (const p of sample) {
+    let n = 0;
+    for (const q of spots) if (Math.abs(q.x - p.x) <= 16 && Math.abs(q.z - p.z) <= 16 && Math.abs(q.y - p.y) <= 8) n++;
+    const score = n - p.distanceTo(me) * 0.5;
+    if (score > bestScore) { bestScore = score; best = p; }
+  }
+  return best ? best.offset(0, 1, 0) : null;
 }
 
 // Etrafımız kapalı mı? Değilse kapat (kapsül: ayak ve baş hizasında dört yan + tavan + zemin).
@@ -207,4 +221,4 @@ async function craftEyes(bot) {
   return A.count(bot, "ender_eye");
 }
 
-module.exports = { PEARLS_NEEDED, findWarpedGround, sealCapsule, huntEndermen, craftEyes, pearls };
+module.exports = { PEARLS_NEEDED, findWarpedGround, openNylium, sealCapsule, huntEndermen, craftEyes, pearls };
