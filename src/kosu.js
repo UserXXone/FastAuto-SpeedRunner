@@ -105,6 +105,26 @@ function connect(host, port, username) {
 function watchHealth(bot) {
   const HOSTILE = /zombie|skeleton|creeper|spider|drowned|witch|enderman|slime|phantom|pillager|piglin|hoglin|blaze|ghast|magma_cube|wither|husk|stray|silverfish/;
   let last = bot.health;
+  // Hasarın kaynağı: sunucunun damage_event'i (tür + sorumlu varlık) ve düşme yüksekliği.
+  const damageTypes = [];
+  bot._client.on("registry_data", (p) => {
+    if (p && /damage_type/.test(String(p.id)) && Array.isArray(p.entries))
+      p.entries.forEach((e, i) => { damageTypes[i] = String(e.key || e.id || i).replace("minecraft:", ""); });
+  });
+  let peakY = null;
+  bot.on("physicsTick", () => {
+    if (!bot.entity) return;
+    const y = bot.entity.position.y;
+    if (bot.entity.onGround || bot.entity.isInWater || bot.entity.isInLava) peakY = y;
+    else if (peakY === null || y > peakY) peakY = y;
+  });
+  bot._client.on("damage_event", (p) => {
+    if (!bot.entity || p.entityId !== bot.entity.id) return;
+    const type = damageTypes[p.sourceTypeId] || `tür#${p.sourceTypeId}`;
+    const src = bot.entities[p.sourceCauseId - 1] || bot.entities[p.sourceDirectId - 1];
+    const fall = peakY !== null ? (peakY - bot.entity.position.y).toFixed(1) : "?";
+    console.log(`🩸 hasar: ${type}${src ? " ← " + (src.name || src.username) : ""} (düşme ${fall})`);
+  });
   bot.on("health", () => {
     if (bot.health < last - 0.01) {
       const me = bot.entity.position;

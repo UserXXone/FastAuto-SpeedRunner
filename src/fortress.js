@@ -212,6 +212,11 @@ async function collectFromBelow(bot, spawner, strike) {
       .filter((d) => inRoom(spawner, d.position) && !tried.has(d.id))
       .sort((a, b) => a.position.distanceTo(me) - b.position.distanceTo(me))[0];
     if (!drop) break;
+    // İçeride blaze varken ya da can azken zemini açma: delikten içeri girer.
+    if (bot.health < 10 || C.hostilesNear(bot, 16).some((e) => e.name === "blaze" && inRoom(spawner, e.position))) {
+      A.dbg(`toplama kesildi: can ${bot.health.toFixed(0)}, içeride blaze olabilir`);
+      break;
+    }
     tried.add(drop.id);
     const cx = Math.floor(drop.position.x);
     const cz = Math.floor(drop.position.z);
@@ -226,7 +231,17 @@ async function collectFromBelow(bot, spawner, strike) {
       await strike();
       await A.sleep(50);
     }
-    await placeFiller(bot, lid);
+    // Kapak koyulmazsa (blaze/eşya hücrede) vurarak tekrar dene; delik açık kalmasın.
+    let closed = await placeFiller(bot, lid);
+    for (let i = 0; i < 40 && !closed; i++) {
+      await strike();
+      await A.sleep(100);
+      closed = await placeFiller(bot, lid);
+    }
+    if (!closed) {
+      A.dbg("kapak kapanmadı, toplama kesildi:", lid.toString());
+      break;
+    }
   }
   // Saklanma yerine dön.
   await H.highway(bot, { x: h.x, y: level, z: h.z }, { enclosed: true, maxMs: 20000 });
@@ -343,7 +358,7 @@ async function farmBlazes(bot, spawner, need, say, opts = {}) {
       void idle;
       // Yerde çubuk var ve içeride vuracak blaze kalmadıysa hemen al (bekletince
       // sonraki dalga gelir; çubuklar 5 dakikada kaybolur).
-      if (floorRods.length && !inside.length && Date.now() - lastTrip > 5000) {
+      if (floorRods.length && !inside.length && bot.health >= 10 && Date.now() - lastTrip > 5000) {
         trips++;
         const got = await collectFromBelow(bot, spawner, strike);
         say(`  çubuklar alttan toplandı: ${got}/${need}`);

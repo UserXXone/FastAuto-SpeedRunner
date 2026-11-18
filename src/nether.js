@@ -27,6 +27,7 @@ const LOGS_NEEDED = 10; // aletler, 4 kazmanın çubukları, fırın yakıtı, y
 const COBBLE_NEEDED = 16; // kazma 3 + kılıç 2 + 3 yedek kazma 9 + yedek
 const RODS_NEEDED = 6; // 12 göz için 12 toz = 6 çubuk (kalenin yeri belli, göz atmıyoruz)
 const FOOD_WANTED = 6;
+const FOOD_MIN = 3; // bundan azsa Nether'a girmeden önce hayvan ara
 const GOALS = ["nether", "blaze", "pearl", "kale"]; // koşunun nereye kadar gideceği
 
 // Uzak bir (x,z) noktasına parça parça yürü; ilerleme durursa bırak.
@@ -325,7 +326,15 @@ async function run(bot, info, opts = {}) {
     }
     if (opts.start !== "portal") {
       await stageTools(bot, timer);
-      const meat = await C.huntFood(bot, FOOD_WANTED, { radius: 32, budgetMs: 30000 });
+      let meat = await C.huntFood(bot, FOOD_WANTED, { radius: 32, budgetMs: 30000 });
+      // Yemeksiz Nether'a girme: can geri dolmaz. Az et varsa etrafı gezip ara (en çok ~2 dk).
+      for (let i = 0; i < 4 && meat < FOOD_MIN; i++) {
+        const me = bot.entity.position;
+        const ang = (i * Math.PI) / 2 + Math.random();
+        say(`Yemek az (${meat} et), hayvan aranıyor`);
+        await A.goto(bot, new GoalNearXZ(Math.round(me.x + Math.cos(ang) * 48), Math.round(me.z + Math.sin(ang) * 48), 4), 25000);
+        meat = await C.huntFood(bot, FOOD_WANTED, { radius: 48, budgetMs: 25000 });
+      }
       timer.split(`Yemek (${meat} et)`);
     }
     await stagePortal(bot, info, timer, say);
