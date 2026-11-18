@@ -181,6 +181,9 @@ function atHideout(bot, spawner) {
 // Yerdeki çubukları odaya girmeden topla: zeminin bir kat altından çubuğun
 // altına sürün, başımızın üstündeki zemin bloğunu kır (çubuk üstümüze düşer),
 // bloğu geri koy. strike: yol boyunca menzile giren blaze'e vurmak için.
+// Alttan iki kez alınamayan çubuklar: tekrar tekrar aynı yere gitmeyelim.
+const failed = new Map();
+
 async function collectFromBelow(bot, spawner, strike) {
   const h = hideout(spawner);
   const level = spawner.y - 3; // ayak; baş zeminin alt katmanında, üstümüz kapalı
@@ -209,7 +212,7 @@ async function collectFromBelow(bot, spawner, strike) {
     await strike();
     const me = bot.entity.position;
     const drop = rodDrops(bot, spawner.offset(0.5, 0, 0.5), 6)
-      .filter((d) => inRoom(spawner, d.position) && !tried.has(d.id))
+      .filter((d) => inRoom(spawner, d.position) && !tried.has(d.id) && (failed.get(d.id) || 0) < 2)
       .sort((a, b) => a.position.distanceTo(me) - b.position.distanceTo(me))[0];
     if (!drop) break;
     // İçeride blaze varken ya da can azken zemini açma: delikten içeri girer.
@@ -226,10 +229,19 @@ async function collectFromBelow(bot, spawner, strike) {
     if (r !== "arrived") continue;
     const before = rods();
     const lid = new (require("vec3").Vec3)(cx, spawner.y - 1, cz);
+    const lidName = (bot.blockAt(lid) || {}).name;
     await digBlock(lid);
     for (let i = 0; i < 30 && rods() === before && bot.entities[drop.id]; i++) {
       await strike();
+      // Çubuk delikten düşmediyse (kenarda takıldıysa) zıpla: el uzanır, alırız.
+      if (i === 10) bot.setControlState("jump", true);
+      if (i === 14) bot.setControlState("jump", false);
       await A.sleep(50);
+    }
+    bot.setControlState("jump", false);
+    if (rods() === before) {
+      failed.set(drop.id, (failed.get(drop.id) || 0) + 1);
+      A.dbg(`çubuk alınamadı (${failed.get(drop.id)}. kez): kapak ${lid} ${lidName} -> ${(bot.blockAt(lid) || {}).name}`);
     }
     // Kapak koyulmazsa (blaze/eşya hücrede) vurarak tekrar dene; delik açık kalmasın.
     let closed = await placeFiller(bot, lid);
@@ -319,7 +331,7 @@ async function farmBlazes(bot, spawner, need, say, opts = {}) {
       for (const b of inside) seen.add(b.id);
       // Spawner'ın tepesine düşen çubuğa alttan ulaşılamaz: sayma, yoksa boş tur atılır.
       const floorRods = rodDrops(bot, center, 6).filter(
-        (d) => inRoom(spawner, d.position) && !(Math.floor(d.position.x) === spawner.x && Math.floor(d.position.z) === spawner.z),
+        (d) => inRoom(spawner, d.position) && (failed.get(d.id) || 0) < 2 && !(Math.floor(d.position.x) === spawner.x && Math.floor(d.position.z) === spawner.z),
       );
 
       // Odayı kapat / tamir et. Bir yaratığın durduğu hücreye blok koyulamaz; o
