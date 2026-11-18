@@ -143,7 +143,7 @@ async function lure(bot, target) {
  * Dönen: { pearls, kills, ms }
  */
 async function huntEndermen(bot, need, say, opts = {}) {
-  const maxMs = opts.maxMs || 15 * 60e3;
+  const maxMs = opts.maxMs || 20 * 60e3;
   const t0 = Date.now();
   let lastAttack = 0;
   let lastLure = 0;
@@ -163,6 +163,13 @@ async function huntEndermen(bot, need, say, opts = {}) {
       if (Date.now() - t0 > maxMs) throw new Error(`Enderman avı çok uzun sürdü (${pearls(bot)}/${need} pearl)`);
       if (bot.inLavaEscape) {
         await A.sleep(100);
+        continue;
+      }
+      // Blok azaldı: kapsülün altından aşağı doğru kazarak topla (nylium/netherrack).
+      if (A.count(bot, H.isFiller) < 24 && !endermen(bot, 5).length) {
+        A.dbg("enderman avı: blok azaldı, toplanıyor");
+        await H.mineTunnel(bot, 96, 60);
+        await sealCapsule(bot);
         continue;
       }
       if (pearls(bot) !== lastCount) {
