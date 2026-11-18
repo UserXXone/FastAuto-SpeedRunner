@@ -246,10 +246,21 @@ async function stagePearls(bot, info, timer, say, guard) {
     say(`Warped forest'a gidiyorum (${wx}, ${wz} → ${tx}, ${tz})`);
     if (A.count(bot, H.isFiller) < 40) await F.stockScaffold(bot, 120, { x: tx, z: tz });
     let n = 0;
-    const r = await H.longHaul(bot, { x: tx, z: tz }, {
+    let r = await H.longHaul(bot, { x: tx, z: tz }, {
       range: 8, maxMs: 900000, until: () => (++n % 20 === 0 ? dense() : false),
     });
     A.dbg("warped otoyolu:", r, "açık nylium", E.openNylium(bot, 48).length);
+    // Hedefe vardık ama orman seyrekse: en çok nylium görünen yöne 48 blok daha.
+    for (let i = 0; i < 2 && !dense() && r !== "no-blocks"; i++) {
+      const g = E.findWarpedGround(bot, 96);
+      if (!g) break;
+      const c = H.cellOf(bot);
+      const dd = Math.hypot(g.x - c.x, g.z - c.z) || 1;
+      r = await H.longHaul(bot, { x: Math.round(c.x + ((g.x - c.x) / dd) * 48), z: Math.round(c.z + ((g.z - c.z) / dd) * 48) }, {
+        range: 6, maxMs: 300000, until: () => (++n % 20 === 0 ? dense() : false),
+      });
+      A.dbg("warped içine:", r, "açık nylium", E.openNylium(bot, 48).length);
+    }
   }
   const ground = E.findWarpedGround(bot, 64);
   if (!ground) throw new Error("Warped forest zemini bulunamadı");
