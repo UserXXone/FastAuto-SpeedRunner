@@ -98,7 +98,14 @@ async function sealCapsule(bot) {
   const shell = [c.offset(0, -1, 0)];
   for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) shell.push(c.offset(dx, 0, dz));
   for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) shell.push(c.offset(dx, 1, dz));
-  shell.push(c.offset(0, 2, 0));
+  // Tavanın yüzeyden komşusu yoksa (açık havada) tutunamaz: önce yanına bir blok.
+  const roof = c.offset(0, 2, 0);
+  const roofHasRef = [[1, 0], [-1, 0], [0, 1], [0, -1]].some(([dx, dz]) => {
+    const b = bot.blockAt(roof.offset(dx, 0, dz));
+    return b && b.boundingBox === "block";
+  }) || ((bot.blockAt(roof.offset(0, 1, 0)) || {}).boundingBox === "block");
+  if (!roofHasRef) shell.push(c.offset(1, 2, 0));
+  shell.push(roof);
   const own = [c, c.offset(0, 1, 0)];
   let open = 0;
   for (let pass = 0; pass < 2; pass++) {
