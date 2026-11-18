@@ -43,8 +43,9 @@ async function returnToOverworld(bot, back, say = () => {}) {
   if (!foot) {
     if (!back) throw new Error("Dönüş portalının yeri bilinmiyor");
     say(`Portala dönüyorum (${back.x}, ${back.y}, ${back.z})`);
-    const r = await H.highway(bot, { x: back.x, y: null, z: back.z }, {
-      range: 6, maxMs: 600000, enclosed: true, until: () => Boolean((foot = portalFoot(bot, 24))),
+    let n = 0;
+    const r = await H.longHaul(bot, { x: back.x, z: back.z }, {
+      range: 6, maxMs: 900000, until: () => (++n % 10 === 0 ? Boolean((foot = portalFoot(bot, 24))) : false),
     });
     A.dbg("dönüş otoyolu:", r);
     foot = foot || portalFoot(bot, 64);

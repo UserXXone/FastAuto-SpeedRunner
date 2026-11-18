@@ -315,7 +315,7 @@ async function highway(bot, dest, opts = {}) {
 // (x,z) hattı boyunca hangi yükseklikte gitmek en ucuz? Kayanın içinden geçmek
 // bedava (tünel), açık havada her adım ~6 blok ister (kapalı tüp). Dönen:
 // { y, air } — air: o yükseklikte açık havadan geçilecek adım sayısı.
-function planLevel(bot, from, dest, minY = 36) {
+function planLevel(bot, from, dest, minY = 36, maxY = null) {
   const cells = [];
   let x = from.x;
   let z = from.z;
@@ -325,7 +325,7 @@ function planLevel(bot, from, dest, minY = 36) {
     cells.push([x, z]);
   }
   let best = null;
-  for (let y = Math.max(minY, dest.y - 14); y <= dest.y + 1; y++) {
+  for (let y = Math.max(minY, maxY == null ? dest.y - 14 : minY); y <= (maxY == null ? dest.y + 1 : maxY); y++) {
     let air = 0;
     let lava = 0;
     let unknown = 0;
@@ -337,7 +337,7 @@ function planLevel(bot, from, dest, minY = 36) {
       else if (!isSolid(feet) || !isSolid(head)) air++;
     }
     // Yükseklik farkını merdivenle kapatmak da adım ister (kaya içindeyse ucuz).
-    const cost = air * 6 + lava * 40 + unknown * 6 + Math.abs(dest.y - y) * 2 + Math.abs(from.y - y);
+    const cost = air * 6 + lava * 40 + unknown * 6 + (maxY == null ? Math.abs(dest.y - y) * 2 : 0) + Math.abs(from.y - y);
     if (!best || cost < best.cost) best = { y, air: air + unknown, lava, cost };
   }
   return best;
@@ -432,4 +432,37 @@ async function mineTunnel(bot, want, maxSteps = 90, toward = null) {
   return have();
 }
 
-module.exports = { highway, mineTunnel, planLevel, step, walkInto, MINEABLE, placeFiller, clearCell, pillarUp, cellOf, FILLERS, isFiller };
+/**
+ * Uzun yol (Nether): her ~40 blokluk parçada kayanın içinden geçen en ucuz
+ * yüksekliği seç ve o yükseklikte kapalı tünel kaz. Lav denizinin üstünden tüp
+ * kurmak adım başına ~6 blok ve ~2,5 sn; kayanın içinden ~4 kat hızlı.
+ */
+async function longHaul(bot, dest, opts = {}) {
+  const t0 = Date.now();
+  const maxMs = opts.maxMs || 600000;
+  const range = opts.range || 6;
+  for (;;) {
+    const cur = cellOf(bot);
+    const d = Math.hypot(dest.x - cur.x, dest.z - cur.z);
+    if (d <= range) return "arrived";
+    if (Date.now() - t0 > maxMs) return "timeout";
+    const k = Math.min(1, 40 / d);
+    const seg = { x: Math.round(cur.x + (dest.x - cur.x) * k), z: Math.round(cur.z + (dest.z - cur.z) * k) };
+    const lvl = planLevel(bot, cur, { x: seg.x, y: cur.y, z: seg.z }, opts.minY || 40, opts.maxY || 100);
+    const y = lvl ? lvl.y : cur.y;
+    dbgH(`uzun yol: parça ${seg.x},${seg.z} y=${y} (şimdi ${cur.y}) açık hava ${lvl ? lvl.air : "?"} lav ${lvl ? lvl.lava : "?"}`);
+    const r = await highway(bot, { x: seg.x, y, z: seg.z }, {
+      range: k < 1 ? 2 : range, enclosed: true, descendEarly: true, maxMs: Math.max(1000, maxMs - (Date.now() - t0)), until: opts.until, onTick: opts.onTick,
+    });
+    if (r === "until" || r === "no-blocks" || r === "timeout") return r;
+    if (r === "blocked") {
+      // Bu yükseklik olmadı: bulunduğumuz yükseklikte dene.
+      const r2 = await highway(bot, { x: seg.x, y: null, z: seg.z }, { range: 2, enclosed: true, maxMs: 120000, until: opts.until });
+      if (r2 !== "arrived") return r2;
+    }
+  }
+}
+
+const dbgH = (...a) => A.dbg(...a);
+
+module.exports = { longHaul, highway, mineTunnel, planLevel, step, walkInto, MINEABLE, placeFiller, clearCell, pillarUp, cellOf, FILLERS, isFiller };

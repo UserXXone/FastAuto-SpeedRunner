@@ -246,8 +246,8 @@ async function stagePearls(bot, info, timer, say, guard) {
     say(`Warped forest'a gidiyorum (${wx}, ${wz} → ${tx}, ${tz})`);
     if (A.count(bot, H.isFiller) < 40) await F.stockScaffold(bot, 120, { x: tx, z: tz });
     let n = 0;
-    const r = await H.highway(bot, { x: tx, y: null, z: tz }, {
-      range: 8, maxMs: 600000, enclosed: true, until: () => (++n % 20 === 0 ? dense() : false),
+    const r = await H.longHaul(bot, { x: tx, z: tz }, {
+      range: 8, maxMs: 900000, until: () => (++n % 20 === 0 ? dense() : false),
     });
     A.dbg("warped otoyolu:", r, "açık nylium", E.openNylium(bot, 48).length);
   }
