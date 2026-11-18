@@ -12,6 +12,7 @@
 // Sunucu vuruşta görüş hattına bakmadığı için çalışır; normal bir oyuncu yapamaz.
 
 const { Vec3 } = require("vec3");
+const { goals: { GoalNear, GoalNearXZ } } = require("mineflayer-pathfinder");
 const A = require("./actions");
 const C = require("./combat");
 const H = require("./highway");
@@ -153,6 +154,7 @@ async function huntEndermen(bot, need, say, opts = {}) {
   const hit = new Set();
   const lured = new Map(); // id -> kızdırma zamanı
   let lastSuccess = Date.now();
+  let lastStock = 0;
   const onGone = (e) => {
     if (hit.delete(e.id)) kills++;
   };
@@ -166,9 +168,11 @@ async function huntEndermen(bot, need, say, opts = {}) {
         continue;
       }
       // Blok azaldı: kapsülün altından aşağı doğru kazarak topla (nylium/netherrack).
-      if (A.count(bot, H.isFiller) < 24 && !endermen(bot, 5).length) {
-        A.dbg("enderman avı: blok azaldı, toplanıyor");
-        await H.mineTunnel(bot, 96, 60);
+      if (A.count(bot, H.isFiller) < 16 && !endermen(bot, 5).length && Date.now() - lastStock > 30000) {
+        lastStock = Date.now();
+        const before = A.count(bot, H.isFiller);
+        await H.mineTunnel(bot, 64, 40);
+        A.dbg(`enderman avı: blok azaldı, toplandı ${before} → ${A.count(bot, H.isFiller)}`);
         await sealCapsule(bot);
         continue;
       }
@@ -205,8 +209,9 @@ async function huntEndermen(bot, need, say, opts = {}) {
         if (drop && drop.position.distanceTo(bot.entity.position) > 1.4 && !near.some((e) => e.position.distanceTo(bot.entity.position) < 6)) {
           const p = drop.position;
           const cell = new Vec3(Math.floor(p.x), Math.floor(p.y + 0.3), Math.floor(p.z));
-          const r = await H.highway(bot, cell, { enclosed: true, maxMs: 20000 });
-          A.dbg("pearl'e kapsülle gidildi:", r);
+          // Warped forest'ta düşman yok (enderman bakmazsan dokunmaz): açıktan yürü, blok harcama.
+          const r = await A.goto(bot, new GoalNear(cell.x, cell.y, cell.z, 0.5), 15000);
+          A.dbg("pearl'e yürüündü:", r);
           await sealCapsule(bot);
         } else if (near.length && Date.now() - lastLure > 6000 && Date.now() - lastSuccess <= 45000) {
           // Kızdıracak enderman: bize yakın ve aşağı yukarı aynı yükseklikte olan.
@@ -224,7 +229,7 @@ async function huntEndermen(bot, need, say, opts = {}) {
           lastLure = Date.now();
           const c = H.cellOf(bot);
           const dir = [[12, 0], [0, 12], [-12, 0], [0, -12]][Math.floor(Math.random() * 4)];
-          await H.highway(bot, { x: c.x + dir[0], y: null, z: c.z + dir[1] }, { enclosed: true, maxMs: 30000, range: 1 });
+          await A.goto(bot, new GoalNearXZ(c.x + dir[0], c.z + dir[1], 2), 20000);
           await sealCapsule(bot);
         }
       }

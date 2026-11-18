@@ -266,7 +266,9 @@ async function stagePearls(bot, info, timer, say, guard) {
   if (!ground) throw new Error("Warped forest zemini bulunamadı");
   say(`Av yeri: ${ground.x}, ${ground.y}, ${ground.z} (48 blokta ${E.openNylium(bot, 48).length} açık nylium)`);
   if (A.count(bot, H.isFiller) < 24) await F.stockScaffold(bot, 64, ground);
-  const r = await H.highway(bot, ground, { maxMs: 240000, enclosed: true, descendEarly: true, harvest: 96 });
+  // Ormanın içindeyiz: düşman yok, açıktan git (kapalı tüp bütün blokları yiyordu).
+  let r = (await A.goto(bot, new GoalNear(ground.x, ground.y, ground.z, 1), 60000)) ? "arrived" : "goto-failed";
+  if (r !== "arrived") r = await H.highway(bot, ground, { maxMs: 120000, descendEarly: true, harvest: 96 });
   // Kapsül ve pencereler için blok lazım (yer değiştirince yeni kapsül ~10 blok).
   if (A.count(bot, H.isFiller) < 40) await F.stockScaffold(bot, 80);
   A.dbg("av yerine varış:", r, H.cellOf(bot).toString());
