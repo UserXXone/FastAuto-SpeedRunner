@@ -56,6 +56,36 @@ async function placeFiller(bot, cell, depth = 0) {
   return isSolid(bot.blockAt(cell));
 }
 
+// Birden çok hücreyi aynı anda doldur: blok koyma paketlerini beklemeden art arda
+// gönder (her biri tek tek ~0,3 sn sunucu cevabı bekliyordu; tüp adımı ~2 sn
+// sürüyordu). Tutunacak komşusu olmayanlar sonraki turda; kalanlar tek tek.
+async function placeMany(bot, cells) {
+  for (let pass = 0; pass < 2; pass++) {
+    const todo = cells.filter((c) => {
+      const b = bot.blockAt(c);
+      return b && !isSolid(b) && (isOpen(b) || isLiquid(b)) && b.name !== "nether_portal";
+    });
+    if (!todo.length) return;
+    const jobs = [];
+    await A.withHand(bot, async () => {
+      const item = bot.inventory.items().find(isFiller);
+      if (!item) return;
+      if (!bot.heldItem || bot.heldItem.type !== item.type) await bot.equip(item, "hand");
+      for (const c of todo) {
+        for (const d of NEIGHBORS) {
+          const ref = bot.blockAt(c.offset(d[0], d[1], d[2]));
+          if (!isSolid(ref) || ref.name === "spawner" || ref.name === "chest") continue;
+          jobs.push(bot._placeBlockWithOptions(ref, new Vec3(-d[0], -d[1], -d[2]), { forceLook: "ignore", swingArm: "right" }).catch(() => {}));
+          break;
+        }
+      }
+      await Promise.all(jobs);
+    });
+    if (!jobs.length) break;
+  }
+  for (const c of cells) if (!isSolid(bot.blockAt(c))) await placeFiller(bot, c);
+}
+
 // Hücrenin komşularındaki lavı blokla kapat (kazınca içeri akmasın).
 // Kapatılamayan lav kaldıysa false döner: o hücre kazılmamalı.
 async function sealLavaAround(bot, cell, skip) {
@@ -173,11 +203,8 @@ async function step(bot, from, to, enclosed = false) {
         if (!kept(n) && !shell.some((x) => x.equals(n))) shell.push(n);
       }
     }
-    for (const n of shell) {
-      const b = bot.blockAt(n);
-      if (!b) return false;
-      if (!isSolid(b)) await placeFiller(bot, n);
-    }
+    if (shell.some((n) => !bot.blockAt(n))) return false;
+    await placeMany(bot, shell);
   }
   for (const c of corridor) {
     if (!(await clearCell(bot, c, keep))) return false;
