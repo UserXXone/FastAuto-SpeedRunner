@@ -217,7 +217,8 @@ async function collectFromBelow(bot, spawner, strike) {
     if (!drop) break;
     // İçeride blaze varken ya da can azken zemini açma: delikten içeri girer.
     // Delik ~1 sn açık kalıyor; sadece çubuğun hemen yanında blaze varsa bekle.
-    if (bot.health < 10 || C.hostilesNear(bot, 16).some((e) => e.name === "blaze" && e.position.distanceTo(drop.position) < 2.5)) {
+    const nearDrop = (e) => e.position.distanceTo(drop.position) < (e.name === "zombified_piglin" ? 3.5 : 2.5);
+    if (bot.health < 10 || Object.values(bot.entities).some((e) => (e.name === "blaze" || e.name === "zombified_piglin") && nearDrop(e))) {
       A.dbg(`toplama kesildi: can ${bot.health.toFixed(0)}, içeride blaze olabilir`);
       break;
     }
@@ -232,7 +233,9 @@ async function collectFromBelow(bot, spawner, strike) {
     const lid = new (require("vec3").Vec3)(cx, spawner.y - 1, cz);
     const lidName = (bot.blockAt(lid) || {}).name;
     await digBlock(lid);
+    const hp0 = bot.health;
     for (let i = 0; i < 30 && rods() === before && bot.entities[drop.id]; i++) {
+      if (bot.health < hp0) break; // delikten vuruluyoruz: hemen kapat
       await strike();
       // Çubuk delikten düşmediyse (kenarda takıldıysa) zıpla: el uzanır, alırız.
       if (i === 10) bot.setControlState("jump", true);
@@ -304,8 +307,12 @@ async function farmBlazes(bot, spawner, need, say, opts = {}) {
   bot.on("entityGone", onGone);
   // Menzildeki düşmana vur (önce blaze). Görüş hattı gerekmez: sunucu sadece mesafeye bakar.
   const strike = async () => {
+    // Kılıcın süpürme vuruşu hedefin ~1 blok yanındakilere de değer: yanında
+    // zombified piglin olan blaze'e vurma, sürü kızıp delikten saldırıyor (ölüm).
+    const piglins = Object.values(bot.entities).filter((e) => e.name === "zombified_piglin");
     const target = C.hostilesNear(bot, 8)
       .filter((e) => e.name !== "ghast" && C.reachDistance(bot, e) <= 3.0)
+      .filter((e) => !piglins.some((p) => p.position.distanceTo(e.position) < 2.2))
       .sort((a, b) => (a.name === "blaze" ? 0 : 1) - (b.name === "blaze" ? 0 : 1))[0];
     if (target && Date.now() - lastAttack >= C.SWORD_COOLDOWN) {
       if (target.name === "blaze") seen.add(target.id);

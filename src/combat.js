@@ -90,7 +90,14 @@ function isHostile(bot, e) {
   if (!e || e === bot.entity || !e.name || !e.position) return false;
   if (HOSTILE.has(e.name)) return true;
   if (e.name === "piglin") return !wearsGold(bot);
-  return false;
+  // Bize vuran zombified piglin/enderman artık düşman: karşılık ver.
+  if (!bot._angry) {
+    bot._angry = new Set();
+    bot.on("entityHurt", (who, src) => {
+      if (who === bot.entity && src && src.name && src.name !== bot.username) bot._angry.add(src.id);
+    });
+  }
+  return bot._angry.has(e.id);
 }
 
 function hostilesNear(bot, range) {
