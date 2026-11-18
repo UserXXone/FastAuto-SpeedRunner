@@ -76,6 +76,11 @@ function findWarpedGround(bot, maxDistance = 96, minOpen = 0) {
 }
 
 // Etrafımız kapalı mı? Değilse kapat (kapsül: ayak ve baş hizasında dört yan + tavan + zemin).
+// Komşu bir bloğa tutunarak koy; tutunacak yer yoksa vazgeç.
+async function placeNoRecurse(bot, p) {
+  return H.placeFiller(bot, p, 99);
+}
+
 async function sealCapsule(bot) {
   // Bloğun ortasında dur: kenardaysak gövdemiz komşu hücreye taşar, sunucu oraya
   // blok koymayı reddeder ve kapsül açık kalır (enderman vuruyor: can 0,2'ye indi).
@@ -89,18 +94,26 @@ async function sealCapsule(bot) {
   }
   bot.setControlState("forward", false);
   await A.sleep(100);
-  const shell = [c.offset(0, -1, 0), c.offset(0, 2, 0)];
-  for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
-    shell.push(c.offset(dx, 0, dz), c.offset(dx, 1, dz));
-  }
+  // Sıra önemli: zemin, yanlar, en son tavan (tavan ancak yan bloklara tutunur).
+  const shell = [c.offset(0, -1, 0)];
+  for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) shell.push(c.offset(dx, 0, dz));
+  for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) shell.push(c.offset(dx, 1, dz));
+  shell.push(c.offset(0, 2, 0));
+  const own = [c, c.offset(0, 1, 0)];
   let open = 0;
-  for (const p of shell) {
-    const b = bot.blockAt(p);
-    if (b && b.boundingBox !== "block") {
-      if (!(await H.placeFiller(bot, p))) open++;
+  for (let pass = 0; pass < 2; pass++) {
+    open = 0;
+    for (const p of shell) {
+      const b = bot.blockAt(p);
+      if (!b || b.boundingBox === "block") continue;
+      // placeFiller tutunamazsa alttaki hücreyi doldurmaya kalkar: kendi hücremize değil.
+      const below = p.offset(0, -1, 0);
+      const ok = own.some((o) => o.equals(below)) ? await placeNoRecurse(bot, p) : await H.placeFiller(bot, p);
+      if (!ok) open++;
     }
+    if (!open) break;
   }
-  if (open) A.dbg("kapsül kapanmadı:", open, "açık", c.toString());
+  if (open) A.dbg("kapsül kapanmadı:", open, "açık", c.toString(), shell.filter((p) => !(bot.blockAt(p) || {}).boundingBox || bot.blockAt(p).boundingBox !== "block").map((p) => `${p}:${(bot.blockAt(p) || {}).name}`).join(" "));
   return open === 0;
 }
 
@@ -193,7 +206,8 @@ async function huntEndermen(bot, need, say, opts = {}) {
         say(`  ender pearl ${lastCount}/${need}`);
       }
       const near = endermen(bot, 64);
-      const inReach = near.find((e) => C.reachDistance(bot, e) <= 3.0);
+      // Menzildeki enderman ya da başka düşman (piglin vb.: av sırasında koruma kapalı).
+      const inReach = near.find((e) => C.reachDistance(bot, e) <= 3.0) || C.hostilesNear(bot, 6).find((e) => C.reachDistance(bot, e) <= 3.0);
       if (Date.now() - lastLog > 10000) {
         lastLog = Date.now();
         A.dbg(
