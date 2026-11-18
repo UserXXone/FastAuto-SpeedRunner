@@ -187,6 +187,8 @@ async function huntEndermen(bot, need, say, opts = {}) {
   const lured = new Map(); // id -> kızdırma zamanı
   let lastSuccess = Date.now();
   let lastStock = 0;
+  // Aynı anda en çok 3 kızgın enderman: hepsi kapsülün dibine gelip sırayla kesilir.
+  const angryCount = () => [...lured.entries()].filter(([id, t]) => bot.entities[id] && Date.now() - t < 30000).length;
   const onGone = (e) => {
     if (hit.delete(e.id)) kills++;
   };
@@ -246,7 +248,7 @@ async function huntEndermen(bot, need, say, opts = {}) {
           const r = await A.goto(bot, new GoalNear(cell.x, cell.y, cell.z, 0.5), 15000);
           A.dbg("pearl'e yürüündü:", r);
           await sealCapsule(bot);
-        } else if (near.length && Date.now() - lastLure > 6000 && Date.now() - lastSuccess <= 45000) {
+        } else if (near.length && Date.now() - lastLure > 2000 && angryCount() < 3 && Date.now() - lastSuccess <= 45000) {
           // Kızdıracak enderman: bize yakın ve aşağı yukarı aynı yükseklikte olan.
           // Kızdıracak enderman: kapsülün bir duvar bloğunu açınca görülebilen.
           const target = near.find((e) => e.position.distanceTo(bot.entity.position) >= 3 && !(Date.now() - (lured.get(e.id) || 0) < 20000) && windowFor(bot, e));
