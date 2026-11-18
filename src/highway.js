@@ -56,6 +56,38 @@ async function placeFiller(bot, cell, depth = 0) {
   return isSolid(bot.blockAt(cell));
 }
 
+// Tünelin yan duvarlarından blok al (dolgu azaldıysa). Sadece arkası tamamen
+// kaya olan duvar bloklarını kazar: açılan cep kapalı kalır, dışarısı görünmez.
+async function harvestWalls(bot, from, at) {
+  const mx = Math.sign(at.x - from.x);
+  const mz = Math.sign(at.z - from.z);
+  if (!mx && !mz) return;
+  const sides = mx ? [[0, 1], [0, -1]] : [[1, 0], [-1, 0]];
+  for (const [sx, sz] of sides) {
+    for (const dy of [0, 1]) {
+      const c = at.offset(sx, dy, sz);
+      const b = bot.blockAt(c);
+      if (!b || !MINEABLE.has(b.name)) continue;
+      const tunnel = [at, at.offset(0, 1, 0)];
+      const sealed = NEIGHBORS.every(([x, y, z]) => {
+        const n = c.offset(x, y, z);
+        if (tunnel.some((t) => t.equals(n))) return true;
+        const nb = bot.blockAt(n);
+        return isSolid(nb) && !isLava(nb);
+      });
+      if (!sealed || lavaWithin(bot, c, 1)) continue;
+      try {
+        await A.withHand(bot, async () => {
+          const { item } = A.fastestTool(bot, b);
+          if (item && (!bot.heldItem || bot.heldItem.type !== item.type)) await bot.equip(item, "hand");
+          await bot.dig(b, true);
+        });
+      } catch (err) { /* olmadı */ }
+    }
+  }
+  await A.sleep(150); // düşen bloklar toplansın
+}
+
 // Birden çok hücreyi aynı anda doldur: blok koyma paketlerini beklemeden art arda
 // gönder (her biri tek tek ~0,3 sn sunucu cevabı bekliyordu; tüp adımı ~2 sn
 // sürüyordu). Tutunacak komşusu olmayanlar sonraki turda; kalanlar tek tek.
@@ -341,6 +373,7 @@ async function highway(bot, dest, opts = {}) {
     if (moved) {
       fails = 0;
       steps++;
+      if (opts.harvest && A.count(bot, isFiller) < opts.harvest) await harvestWalls(bot, cur, cellOf(bot));
       if (opts.onStep && steps % 8 === 0) opts.onStep(cur);
     } else if (++fails > 8) {
       return "blocked";
@@ -488,9 +521,17 @@ async function longHaul(bot, dest, opts = {}) {
     const y = lvl ? lvl.y : cur.y;
     dbgH(`uzun yol: parça ${seg.x},${seg.z} y=${y} (şimdi ${cur.y}) açık hava ${lvl ? lvl.air : "?"} lav ${lvl ? lvl.lava : "?"}`);
     const r = await highway(bot, { x: seg.x, y, z: seg.z }, {
+      harvest: opts.harvest || 128,
       range: k < 1 ? 2 : range, enclosed: true, descendEarly: true, maxMs: Math.max(1000, maxMs - (Date.now() - t0)), until: opts.until, onTick: opts.onTick,
     });
-    if (r === "until" || r === "no-blocks" || r === "timeout") return r;
+    if (r === "no-blocks") {
+      // Blok bitti: hedefe doğru kayanın içine kazarak topla.
+      dbgH("uzun yol: dolgu bitti, kazarak toplanıyor");
+      await mineTunnel(bot, 64, 60, dest);
+      if (A.count(bot, isFiller) < 8) return r;
+      continue;
+    }
+    if (r === "until" || r === "timeout") return r;
     if (r === "blocked") {
       // Bu yükseklik olmadı: bulunduğumuz yükseklikte dene.
       const r2 = await highway(bot, { x: seg.x, y: null, z: seg.z }, { range: 2, enclosed: true, maxMs: 120000, until: opts.until });
