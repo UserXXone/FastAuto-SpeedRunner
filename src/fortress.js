@@ -216,7 +216,8 @@ async function collectFromBelow(bot, spawner, strike) {
       .sort((a, b) => a.position.distanceTo(me) - b.position.distanceTo(me))[0];
     if (!drop) break;
     // İçeride blaze varken ya da can azken zemini açma: delikten içeri girer.
-    if (bot.health < 10 || C.hostilesNear(bot, 16).some((e) => e.name === "blaze" && inRoom(spawner, e.position))) {
+    // Delik ~1 sn açık kalıyor; sadece çubuğun hemen yanında blaze varsa bekle.
+    if (bot.health < 10 || C.hostilesNear(bot, 16).some((e) => e.name === "blaze" && e.position.distanceTo(drop.position) < 2.5)) {
       A.dbg(`toplama kesildi: can ${bot.health.toFixed(0)}, içeride blaze olabilir`);
       break;
     }
@@ -370,7 +371,11 @@ async function farmBlazes(bot, spawner, need, say, opts = {}) {
       void idle;
       // Yerde çubuk var ve içeride vuracak blaze kalmadıysa hemen al (bekletince
       // sonraki dalga gelir; çubuklar 5 dakikada kaybolur).
-      if (floorRods.length && !inside.length && bot.health >= 10 && Date.now() - lastTrip > 5000) {
+      // İçerisi hiç boşalmayabilir (spawner sürekli doğuruyor): blaze'ler çubuklardan
+      // uzaktaysa ya da 20 sn'dir bekliyorsak yine de topla.
+      const farFromRods = inside.every((b) => floorRods.every((d) => b.position.distanceTo(d.position) >= 2.5));
+      const canTrip = !inside.length || (farFromRods && Date.now() - lastTrip > 20000);
+      if (floorRods.length && canTrip && bot.health >= 10 && Date.now() - lastTrip > 5000) {
         trips++;
         const got = await collectFromBelow(bot, spawner, strike);
         say(`  çubuklar alttan toplandı: ${got}/${need}`);
