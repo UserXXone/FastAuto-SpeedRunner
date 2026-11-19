@@ -188,8 +188,18 @@ async function buildPillar(bot) {
         if (b && b.boundingBox === "block") { top = Math.max(top, y); break; }
       }
     }
-  const want = Math.max(PILLAR + 1, top + 1 + 4 - base.y);
-  for (let i = 0; i < Math.min(want, 9); i++) if (!(await H.pillarUp(bot))) break;
+  const want = Math.min(8, Math.max(PILLAR, top + 1 + 3 - base.y));
+  // Her yükselmeden önce yere inmeyi bekle (beklemeyince ikinci zıplama hep boşa gidiyordu).
+  for (let i = 0; i < want + 3 && H.cellOf(bot).y < base.y + want; i++) {
+    for (let k = 0; k < 20 && !bot.entity.onGround; k++) await A.sleep(50);
+    await A.sleep(120);
+    await H.pillarUp(bot);
+  }
+  for (let k = 0; k < 20 && !bot.entity.onGround; k++) await A.sleep(50);
+  A.dbg("direk:", H.cellOf(bot).y - base.y, "blok (istenen", want + ")");
+  // Direk kurulamadıysa fincanı yerde kurma (çukur tuzağı olur).
+  if (H.cellOf(bot).y - base.y < PILLAR) { bot._pillarTop = null; return false; }
+  bot._noFill = [H.cellOf(bot), H.cellOf(bot).offset(0, 1, 0)];
   // Fincan: ayak hizasında 4 yan duvar (altlarına birer çıkıntı). Ok/vuruş sekmesi
   // bizi direkten düşürüyordu (piglin oku, enderman). Duvarlar ayak hizasında: göz
   // hizası açık, görüş kapanmaz.
@@ -200,6 +210,7 @@ async function buildPillar(bot) {
     for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) cells.push(c.offset(dx, 0, dz));
     await H.placeMany(bot, cells, 3);
   }
+  bot._noFill = null;
   const ok = onPillar(bot);
   bot._pillarTop = ok ? H.cellOf(bot) : null;
   if (!ok) {
@@ -338,6 +349,7 @@ async function huntEndermen(bot, need, say, opts = {}) {
   let lastSuccess = Date.now();
   let lastStock = 0;
   let lastHp = bot.health;
+  const dropSeen = new Map();
   const tries = new Map(); // id -> kaç kez kızdırıldı
   // Direkten inmek güvenli mi: yakında (32) son 60 sn'de kızdırılmış ya da 8 blok içinde enderman yok.
   const safeToLeave = () => {
@@ -400,7 +412,12 @@ async function huntEndermen(bot, need, say, opts = {}) {
       } else {
         // Yerde pearl varsa ve yanımızda kızgın enderman yoksa kapsülü oraya yürüt.
         const drop = pearlDrops(bot, 12)[0];
-        if (drop && drop.position.distanceTo(bot.entity.position) > 1.4 && angryCount() === 0 && safeToLeave() && bot.health >= 12 && !near.some((e) => e.position.distanceTo(bot.entity.position) < 8)) {
+        // Direkteyken her pearl için inip çıkmak ~5 sn: en az 2 birikince ya da biri 60 sn
+        // beklediyse in (pearl 5 dk'da kaybolur).
+        const drops = pearlDrops(bot, 12);
+        for (const p of drops) if (!dropSeen.has(p.id)) dropSeen.set(p.id, Date.now());
+        const batch = MODE !== "direk" || drops.length >= 2 || drops.some((p) => Date.now() - dropSeen.get(p.id) > 60000) || pearls(bot) + drops.length >= need;
+        if (drop && batch && drop.position.distanceTo(bot.entity.position) > 1.4 && angryCount() === 0 && safeToLeave() && bot.health >= 12 && !near.some((e) => e.position.distanceTo(bot.entity.position) < 8)) {
           const p = drop.position;
           const cell = new Vec3(Math.floor(p.x), Math.floor(p.y + 0.3), Math.floor(p.z));
           if (MODE === "direk") await leavePillar(bot);
