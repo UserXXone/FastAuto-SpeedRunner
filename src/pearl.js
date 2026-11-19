@@ -19,6 +19,8 @@ const H = require("./highway");
 
 const PEARLS_NEEDED = 12; // 12 göz
 const ENDERMAN_EYE = 2.55;
+// Sunucu saldırıda göz-hitbox mesafesine bakıyor; 3,0 çok temkinli (deneme: env PEARL_REACH).
+const REACH = Number(process.env.PEARL_REACH || 3.0);
 
 const pearls = (bot) => A.count(bot, "ender_pearl");
 
@@ -167,7 +169,9 @@ async function lure(bot, target) {
     await bot.lookAt(target.position.offset(0, ENDERMAN_EYE, 0), true);
     await A.sleep(50);
   }
-  await H.placeFiller(bot, win);
+  // Pencere kapanmazsa enderman görüş hattından vurur: kapanana kadar dene.
+  for (let i = 0; i < 8 && !(await H.placeFiller(bot, win)); i++) await A.sleep(150);
+  if (!((bot.blockAt(win) || {}).boundingBox === "block")) A.dbg("pencere kapanmadı!", win.toString());
   return true;
 }
 
@@ -187,6 +191,7 @@ async function huntEndermen(bot, need, say, opts = {}) {
   const lured = new Map(); // id -> kızdırma zamanı
   let lastSuccess = Date.now();
   let lastStock = 0;
+  let lastHp = bot.health;
   // Aynı anda en çok 3 kızgın enderman: hepsi kapsülün dibine gelip sırayla kesilir.
   const angryCount = () => [...lured.entries()].filter(([id, t]) => bot.entities[id] && Date.now() - t < 30000).length;
   const onGone = (e) => {
@@ -216,12 +221,13 @@ async function huntEndermen(bot, need, say, opts = {}) {
       }
       const near = endermen(bot, 64);
       // Menzildeki enderman ya da başka düşman (piglin vb.: av sırasında koruma kapalı).
-      const inReach = near.find((e) => C.reachDistance(bot, e) <= 3.0) || C.hostilesNear(bot, 6).find((e) => C.reachDistance(bot, e) <= 3.0);
+      const inReach = near.find((e) => C.reachDistance(bot, e) <= REACH) || C.hostilesNear(bot, 6).find((e) => C.reachDistance(bot, e) <= 3.0);
       if (Date.now() - lastLog > 10000) {
         lastLog = Date.now();
         A.dbg(
           `enderman avı: can ${bot.health.toFixed(0)} pearl ${pearls(bot)}/${need} öldürülen ${kills} görünen ${near.length}`,
           near[0] ? `en yakın ${near[0].position.distanceTo(bot.entity.position).toFixed(1)}` : "",
+          "kızgınlar(menzil):", [...lured.keys()].filter((id) => bot.entities[id]).map((id) => C.reachDistance(bot, bot.entities[id]).toFixed(1)).join(" "),
         );
       }
       if (inReach) {
@@ -241,14 +247,14 @@ async function huntEndermen(bot, need, say, opts = {}) {
       } else {
         // Yerde pearl varsa ve yanımızda kızgın enderman yoksa kapsülü oraya yürüt.
         const drop = pearlDrops(bot, 12)[0];
-        if (drop && drop.position.distanceTo(bot.entity.position) > 1.4 && !near.some((e) => e.position.distanceTo(bot.entity.position) < 6)) {
+        if (drop && drop.position.distanceTo(bot.entity.position) > 1.4 && angryCount() === 0 && bot.health >= 12 && !near.some((e) => e.position.distanceTo(bot.entity.position) < 8)) {
           const p = drop.position;
           const cell = new Vec3(Math.floor(p.x), Math.floor(p.y + 0.3), Math.floor(p.z));
           // Warped forest'ta düşman yok (enderman bakmazsan dokunmaz): açıktan yürü, blok harcama.
           const r = await A.goto(bot, new GoalNear(cell.x, cell.y, cell.z, 0.5), 15000);
           A.dbg("pearl'e yürüündü:", r);
           await sealCapsule(bot);
-        } else if (near.length && Date.now() - lastLure > 2000 && angryCount() < 3 && Date.now() - lastSuccess <= 45000) {
+        } else if (near.length && bot.health >= 12 && Date.now() - lastLure > 2000 && angryCount() < 3 && Date.now() - lastSuccess <= 45000) {
           // Kızdıracak enderman: bize yakın ve aşağı yukarı aynı yükseklikte olan.
           // Kızdıracak enderman: kapsülün bir duvar bloğunu açınca görülebilen.
           const target = near.find((e) => e.position.distanceTo(bot.entity.position) >= 3 && !(Date.now() - (lured.get(e.id) || 0) < 20000) && windowFor(bot, e));
@@ -274,7 +280,10 @@ async function huntEndermen(bot, need, say, opts = {}) {
           await sealCapsule(bot);
         }
       }
-      if (!inReach && bot.food < 18 && C.bestFood(bot)) await C.eat(bot);
+      if (!inReach && (bot.food < 18 || (bot.health < 14 && bot.food < 20)) && C.bestFood(bot)) await C.eat(bot);
+      // Vurulduysak kapsülde delik var: kapat.
+      if (bot.health < lastHp) await sealCapsule(bot);
+      lastHp = bot.health;
       await A.sleep(50);
     }
   } finally {
