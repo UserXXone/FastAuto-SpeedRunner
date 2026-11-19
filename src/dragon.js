@@ -98,7 +98,8 @@ async function reachCenter(bot, dist = 7, say = () => {}) {
 
 // Duruş yerinin fıskiye yönündeki iki hücre: duvar (1 blok önde, 2 yüksek) ve yatak yeri (2 blok önde).
 const BED_RAISE = Number(process.env.BED_RAISE || 2);
-const OPEN = process.env.EJDERHA_MOD !== "siginak"; // açık: yüzeyde dur (iniş için görünmek şart: görünmezken hiç oturmadı)
+const OPEN = process.env.EJDERHA_MOD !== "siginak";
+const ARROWS = process.env.EJDERHA_OK === "1"; // otururken kafaya ok: vanilla oturan ejderha oka bağışık (deneysel, kapalı) // açık: yüzeyde dur (iniş için görünmek şart: görünmezken hiç oturmadı)
 const POPUP = process.env.EJDERHA_CIK !== "0"; // inişte yüzeye çık: görmediği oyuncu için ~hiç oturmuyor (ölçüldü)
 function layout(stand) {
   const d = Math.hypot(stand.x, stand.z) || 1;
@@ -409,7 +410,7 @@ async function killDragon(bot, say = () => {}, opts = {}) {
       const k = await shootCrystals(bot, say, opts.crystalMs || 120000);
       say(`Kristaller (platformdan): ${k.broken} patladı, ${k.left} kaldı`);
     }
-    const stand = (await reachCenter(bot, opts.dist || 12, say)).surface;
+    const stand = (await reachCenter(bot, opts.dist || 14, say)).surface;
     const top = fountainTop(bot) || 62;
     const L = layout(stand);
     // Sığınak: duruş yerinde 2 blok aşağı kaz, üstünü kapat. Yer altında ejderha bizi
@@ -511,6 +512,7 @@ async function killDragon(bot, say = () => {}, opts = {}) {
     await reseal();
     await clearBedSpot(bot, L);
     let downAt = 0;
+    let arrowsShot = 0;
     if (OPEN) await popUp();
     // Kristalleri döngü içinde, ejderha havadayken teker teker vururuz: kristale
     // kilitlenip inen ejderhayı kaçırıyorduk.
@@ -572,10 +574,23 @@ async function killDragon(bot, say = () => {}, opts = {}) {
       // Yatak hazırda dursun: ejderha oturunca sadece tıklarız (görmezse 5 sn oturuyor).
       if (!up && !bot.blockAt(L.bedFoot)?.name?.endsWith("_bed") && beds(bot) && (!d || !perched(bot, top))) await placeBed(bot, L);
       if (!OPEN && up && !landing && Date.now() - upAt > 6000) { await dropDown("ejderha kalktı"); continue; }
-      // Açık modda vurulup indiysek, bulut dağılınca tekrar çık.
-      if (OPEN && !up && Date.now() - downAt > 5000) {
+      // Açık mod: ejderha uçarken yakınımızdaysa (ateş topu menzili ~64) sığınağa in;
+      // uzaktaysa ya da oturuyorsa yukarıda dur (görünmezsek inmiyor).
+      const dd = d ? d.position.distanceTo(bot.entity.position) : 999;
+      if (OPEN && up && !sitting && dd < 60) { await dropDown("ejderha uçarak yaklaşıyor"); downAt = Date.now(); continue; }
+      if (OPEN && !up && (sitting || dd >= 64) && Date.now() - downAt > 2500) {
         const cl = Object.values(bot.entities).some((e) => e.name === "area_effect_cloud" && e.position.distanceTo(top2) < 7);
         if (!cl) { await popUp(); continue; }
+      }
+      // Oturuyor ve yukarıdayız: kafasına ok (kafa tam hasar alır; yatak patlaması bizi de
+      // vuruyordu). Kafa: gövdeden bize doğru 6,5 blok (otururken oyuncuya döner).
+      if (ARROWS && sitting && up && bow(bot) && arrows(bot)) {
+        const me = bot.entity.position;
+        const v = me.minus(d.position); const n = Math.hypot(v.x, v.z) || 1;
+        const head = { position: d.position.offset((v.x / n) * 6.5, 0.6, (v.z / n) * 6.5), velocity: { x: 0, y: 0, z: 0 } };
+        const ok = await shoot(bot, head, 0, { keep: [] });
+        if (ok) { arrowsShot++; if (arrowsShot % 5 === 1) A.dbg(`kafaya ok (${arrowsShot}), ejderha can ${bot._dragonHp != null ? Math.round(bot._dragonHp * 200) : "?"}`); }
+        continue;
       }
       if (sitting && (up || !POPUP)) {
         // İniş ~50 sn: art arda patlat (duvarı sadece yıkıldıysa onar). Yavaş kalınca
