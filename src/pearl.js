@@ -170,8 +170,7 @@ const PILLAR = 3;
 function onPillar(bot) {
   const c = H.cellOf(bot);
   for (let i = 1; i <= PILLAR; i++) if ((bot.blockAt(c.offset(0, -i, 0)) || {}).boundingBox !== "block") return false;
-  // Yanlarda sağlam blok olmamalı (enderman oraya çıkıp yanımıza gelir).
-  return [[1, 0], [-1, 0], [0, 1], [0, -1]].every(([dx, dz]) => (bot.blockAt(c.offset(dx, -1, dz)) || {}).boundingBox !== "block");
+  return true;
 }
 async function buildPillar(bot) {
   if (bot._pillarTop && H.cellOf(bot).equals(bot._pillarTop)) return true;
@@ -191,6 +190,16 @@ async function buildPillar(bot) {
     }
   const want = Math.max(PILLAR + 1, top + 1 + 4 - base.y);
   for (let i = 0; i < Math.min(want, 9); i++) if (!(await H.pillarUp(bot))) break;
+  // Fincan: ayak hizasında 4 yan duvar (altlarına birer çıkıntı). Ok/vuruş sekmesi
+  // bizi direkten düşürüyordu (piglin oku, enderman). Duvarlar ayak hizasında: göz
+  // hizası açık, görüş kapanmaz.
+  {
+    const c = H.cellOf(bot);
+    const cells = [];
+    for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) cells.push(c.offset(dx, -1, dz));
+    for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) cells.push(c.offset(dx, 0, dz));
+    await H.placeMany(bot, cells, 3);
+  }
   const ok = onPillar(bot);
   bot._pillarTop = ok ? H.cellOf(bot) : null;
   if (!ok) {
