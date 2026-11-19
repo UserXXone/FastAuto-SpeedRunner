@@ -239,11 +239,12 @@ async function stagePearls(bot, info, timer, say, guard) {
     try { const fs=require("fs"), p=`kosu/rota/${info.seed}.json`; if(fs.existsSync(p)) need=B.neededEyes(JSON.parse(fs.readFileSync(p,"utf8")).overworld?.portalOdasi?.takiliGoz||0); } catch (_) {}
   }
   if (info.bastion && Math.hypot(info.bastion[0]-bot.entity.position.x,info.bastion[1]-bot.entity.position.z)<250) {
+    const bastion = {x:info.bastion[0],z:info.bastion[1]};
     let nuggets=A.count(bot,"gold_nugget");
-    if(nuggets<9){nuggets=await B.mineGold(bot,Math.max(18,need*36),say);timer.split(`Altın (${Math.floor(nuggets/9)} külçe)`);}
+    if(nuggets<9){nuggets=await B.mineGold(bot,Math.max(18,need*36),say,{bastion});timer.split(`Altın (${Math.floor(nuggets/9)} külçe)`);}
     if(nuggets>=9){const tb=await A.ensureTable(bot);await A.craft(bot,"gold_ingot",Math.floor(nuggets/9),tb);} // masa verilmezse 3x3 tarif yapılamıyordu
     if(A.count(bot,"gold_ingot")>=4 && !C.wearsGold(bot)){await A.craft(bot,"golden_boots",1,await A.ensureTable(bot));const boots=bot.inventory.items().find(i=>i.name==="golden_boots");if(boots)await bot.equip(boots,"feet");}
-    if(A.count(bot,"gold_ingot")) {const res=await B.barter(bot,need,say,{bastion:{x:info.bastion[0],z:info.bastion[1]}});timer.split(`Takas (${res.pearls} pearl)`);need=Math.max(0,need-res.pearls);}
+    if(A.count(bot,"gold_ingot")) {const res=await B.barter(bot,need,say,{bastion});timer.split(`Takas (${res.pearls} pearl)`);need=Math.max(0,need-res.pearls);}
   }
   // Takas yettiyse avı atla ama gözleri yine yap.
   if (need <= 0) {
