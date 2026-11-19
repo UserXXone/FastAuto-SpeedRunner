@@ -161,7 +161,7 @@ async function killDragon(bot, say = () => {}, opts = {}) {
   const onDead = (e) => { if (e.name === "ender_dragon") killed = true; };
   bot.on("entityDead", onDead);
   try {
-    const stand = await reachCenter(bot, opts.dist || 7, say);
+    const stand = await reachCenter(bot, opts.dist || 9, say);
     const top = fountainTop(bot) || 62;
     const L = layout(stand);
     say(`Duruş ${stand}, fıskiye tepesi y=${top}, yatak ${L.bedFoot}`);
@@ -177,14 +177,17 @@ async function killDragon(bot, say = () => {}, opts = {}) {
         A.dbg(`ejderha: ${d ? `${d.position.x.toFixed(0)},${d.position.y.toFixed(0)},${d.position.z.toFixed(0)}` : "yok"} can ${bot.health.toFixed(0)} yatak ${beds(bot)} patlama ${bombs}`);
       }
       if (d && perched(bot, top)) {
-        // Duvar yerinde mi? (patlama kırabilir)
-        await H.placeMany(bot, L.wall, 2);
-        await clearBedSpot(bot, L);
+        // İniş ~50 sn: art arda patlat (duvarı sadece yıkıldıysa onar). Yavaş kalınca
+        // (tur başına 5 sn) ejderha kafasıyla bizi öldürdü.
+        const solid = (p) => (bot.blockAt(p) || {}).boundingBox === "block";
+        if (!L.wall.every(solid)) await H.placeMany(bot, L.wall, 2);
+        const spot = bot.blockAt(L.bedFoot);
+        if (spot && spot.boundingBox === "block") await clearBedSpot(bot, L);
         if (await bedBomb(bot, L)) {
           bombs++;
           say(`  yatak patladı (${bombs}), ejderha ${d.position.y.toFixed(0)}`);
-          await A.sleep(400);
-        } else await A.sleep(300);
+        }
+        await A.sleep(120);
       } else {
         if (bot.food < 18 && C.bestFood(bot)) await C.eat(bot);
         await A.sleep(200);
