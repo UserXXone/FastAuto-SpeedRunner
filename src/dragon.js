@@ -516,7 +516,7 @@ async function killDragon(bot, say = () => {}, opts = {}) {
     await clearBedSpot(bot, L);
     let downAt = 0;
     let arrowsShot = 0;
-    if (OPEN) await popUp();
+    // İlk çıkış da döngüde: ejderha uzaktayken (hemen çıkınca şafttan ateş topu yedik).
     // Kristalleri döngü içinde, ejderha havadayken teker teker vururuz: kristale
     // kilitlenip inen ejderhayı kaçırıyorduk.
     const crystalTries = new Map();
