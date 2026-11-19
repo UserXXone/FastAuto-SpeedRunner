@@ -330,7 +330,10 @@ async function huntEndermen(bot, need, say, opts = {}) {
           // Kızdıracak enderman: bize yakın ve aşağı yukarı aynı yükseklikte olan.
           // Kızdıracak enderman: kapsülün bir duvar bloğunu açınca görülebilen.
           // İki kez kızdırılıp gelmeyen (yolu yok) endermanı bırak.
-          const target = near.find((e) => e.position.distanceTo(bot.entity.position) >= 3 && (tries.get(e.id) || 0) < 2 && !(Date.now() - (lured.get(e.id) || 0) < 20000) && (HUT ? canSee(bot, e) : windowFor(bot, e)));
+          // Kızgın enderman 16 bloktan uzaktaysa yanımıza ışınlanır; yakındakiler yürümeye
+          // çalışıp takılıyor (ölçüldü: 10-15 blokta kızgın bekliyorlar). Uzaktakini seç.
+          const far = near.filter((e) => e.position.distanceTo(bot.entity.position) >= 17).concat(near.filter((e) => e.position.distanceTo(bot.entity.position) < 17));
+          const target = far.find((e) => e.position.distanceTo(bot.entity.position) >= 3 && (tries.get(e.id) || 0) < 2 && !(Date.now() - (lured.get(e.id) || 0) < 20000) && (HUT ? canSee(bot, e) : windowFor(bot, e)));
           if (target) tries.set(target.id, (tries.get(target.id) || 0) + 1);
           if (target && !(await shelter(bot))) {
             // Kapsül kapanmıyor: bir yana kay, sonra tekrar dene.
