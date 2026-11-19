@@ -157,6 +157,27 @@ async function bedBomb(bot, L) {
   return ok;
 }
 
+// Yolda kurduğumuz kapalı tüpü aç (kırıktaş/netherrack): içinde kalınca nefesten
+// kaçamadık. Duvar hücrelerine dokunma.
+async function openTube(bot, stand, L) {
+  const keep = L ? L.wall : [];
+  for (let dy = 0; dy <= 2; dy++)
+    for (let dx = -1; dx <= 1; dx++)
+      for (let dz = -1; dz <= 1; dz++) {
+        const c = stand.offset(dx, dy, dz);
+        if (keep.some((k) => k.equals(c))) continue;
+        const b = bot.blockAt(c);
+        if (!b || !["cobblestone", "netherrack", "cobbled_deepslate"].includes(b.name)) continue;
+        try {
+          await A.withHand(bot, async () => {
+            const { item } = A.fastestTool(bot, b);
+            if (item && (!bot.heldItem || bot.heldItem.type !== item.type)) await bot.equip(item, "hand");
+            await bot.dig(b, true);
+          });
+        } catch (err) { /* */ }
+      }
+}
+
 // Buluttan uzağa düz koş (zıplayarak, sprint). Önümüz kapalıysa yan dön.
 async function fleeFrom(bot, cloud) {
   // Nefes bulutu büyüyor (yarıçap ~3'ten 6+'ya): 9 blok uzaklaşana kadar koş.
@@ -178,7 +199,24 @@ async function fleeFrom(bot, cloud) {
     C.stopMoving(bot);
     bot.setControlState("sprint", false);
     bot.setControlState("jump", false);
-    if (bot.entity.position.distanceTo(p0) < 2) A.dbg("kaçış yönü kapalı, başka yön");
+    if (bot.entity.position.distanceTo(p0) < 2) {
+      // Önümüz kapalı: önündeki iki bloğu kaz (taş tüp/duvar), sonra tekrar koş.
+      A.dbg("kaçış yönü kapalı, önü açıyorum");
+      const c = H.cellOf(bot);
+      const dx = Math.round(Math.sin(ang)), dz = Math.round(Math.cos(ang));
+      for (const dy of [0, 1]) {
+        const b = bot.blockAt(c.offset(dx, dy, dz));
+        if (b && b.boundingBox === "block" && b.name !== "bedrock" && b.name !== "obsidian") {
+          try {
+            await A.withHand(bot, async () => {
+              const { item } = A.fastestTool(bot, b);
+              if (item) await bot.equip(item, "hand");
+              await bot.dig(b, true);
+            });
+          } catch (err) { /* */ }
+        }
+      }
+    }
   }
 }
 
@@ -295,6 +333,7 @@ async function killDragon(bot, say = () => {}, opts = {}) {
     const top = fountainTop(bot) || 62;
     const L = layout(stand);
     say(`Duruş ${stand}, fıskiye tepesi y=${top}, yatak ${L.bedFoot}`);
+    await openTube(bot, stand, L);
     await H.placeMany(bot, L.wall, 3);
     await clearBedSpot(bot, L);
     // Kristalleri döngü içinde, ejderha havadayken teker teker vururuz: kristale
