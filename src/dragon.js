@@ -130,7 +130,7 @@ async function bedBomb(bot, L) {
   const item = bot.inventory.items().find(isBed);
   if (!item) return false;
   const ground = bot.blockAt(L.bedFoot.offset(0, -1, 0));
-  if (!ground || ground.boundingBox !== "block") return false;
+  if (!ground || ground.boundingBox !== "block") { A.dbg("yatak zemini yok:", L.bedFoot.toString()); return false; }
   let ok = false;
   await A.withHand(bot, async () => {
     await bot.equip(item, "hand");
@@ -181,8 +181,11 @@ async function killDragon(bot, say = () => {}, opts = {}) {
         // (tur başına 5 sn) ejderha kafasıyla bizi öldürdü.
         const solid = (p) => (bot.blockAt(p) || {}).boundingBox === "block";
         if (!L.wall.every(solid)) await H.placeMany(bot, L.wall, 2);
+        // Patlama yatağın altındaki zemini de götürüyor: zemin ya da yer dolmuşsa düzelt.
+        const [ddx, ddz] = L.dir;
+        const under = [L.bedFoot.offset(0, -1, 0), L.bedFoot.offset(ddx, -1, ddz)];
         const spot = bot.blockAt(L.bedFoot);
-        if (spot && spot.boundingBox === "block") await clearBedSpot(bot, L);
+        if (!under.every(solid) || (spot && spot.boundingBox === "block")) await clearBedSpot(bot, L);
         if (await bedBomb(bot, L)) {
           bombs++;
           say(`  yatak patladı (${bombs}), ejderha ${d.position.y.toFixed(0)}`);
