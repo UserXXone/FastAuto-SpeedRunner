@@ -434,11 +434,16 @@ async function killDragon(bot, say = () => {}, opts = {}) {
     }
     const perch = H.cellOf(bot);
     A.dbg("ejderha sığınağı:", perch.toString(), "derinlik", stand.y - perch.y);
-    const shell = [perch.offset(0, -1, 0)];
-    for (const [sx, sz] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) shell.push(perch.offset(sx, 0, sz));
-    for (const [sx, sz] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) shell.push(perch.offset(sx, 1, sz));
-    // Tavan: yanında tutunacak blok yoksa önce bir köprü bloğu (arkamızda, yatağın tersinde).
-    shell.push(perch.offset(-wx, 2, -wz), perch.offset(0, 2, 0));
+    // Kabuk: zemin, dört yan (ayak + baş), köprü + tavan. base: içinde durduğumuz hücre.
+    const shellOf = (b) => {
+      const sh = [b.offset(0, -1, 0)];
+      for (const [sx, sz] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) sh.push(b.offset(sx, 0, sz));
+      for (const [sx, sz] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) sh.push(b.offset(sx, 1, sz));
+      sh.push(b.offset(-wx, 2, -wz), b.offset(0, 2, 0));
+      return sh;
+    };
+    let base = perch;
+    let shell = shellOf(base);
     bot._noFill = [perch, perch.offset(0, 1, 0)];
     const windows = [];
     let up = false; // sığınaktan yüzeye çıktık mı (ejderha bizi görsün diye)
@@ -468,8 +473,9 @@ async function killDragon(bot, say = () => {}, opts = {}) {
     const sideWall = [top2.offset(px, 1, pz), top2.offset(px, 2, pz), top2.offset(wx + px, 1, wz + pz), top2.offset(wx + px, 2, wz + pz)];
     const popUp = async () => {
       bot._noFill = null;
-      await digCell(perch.offset(0, 2, 0));
-      for (let i = 0; i < 3 && H.cellOf(bot).y < perch.y + 1; i++) await H.pillarUp(bot);
+      await digCell(base.offset(0, 2, 0));
+      if (base.y < perch.y) await digCell(base.offset(0, 3, 0));
+      for (let i = 0; i < 4 && H.cellOf(bot).y < perch.y + 1; i++) await H.pillarUp(bot);
       up = H.cellOf(bot).y >= perch.y + 1;
       upAt = Date.now();
       if (up) {
@@ -482,12 +488,16 @@ async function killDragon(bot, say = () => {}, opts = {}) {
     // Sığınağa in: altımızdaki iki bloğu kaz, tavanı kapat.
     const dropDown = async (why) => {
       A.dbg("sığınağa iniyorum:", why);
-      for (let i = 0; i < 3 && H.cellOf(bot).y > perch.y; i++) {
+      // Bir blok daha derine: ateş topunun bulutu tam yukarıdaki yerimize düşüyor, normal
+      // sığınak hizasında hâlâ içindeydik.
+      for (let i = 0; i < 4 && H.cellOf(bot).y > perch.y - 1; i++) {
         await digCell(H.cellOf(bot).offset(0, -1, 0));
         for (let k = 0; k < 20 && !bot.entity.onGround; k++) await A.sleep(50);
       }
       up = false;
-      bot._noFill = [perch, perch.offset(0, 1, 0)];
+      base = H.cellOf(bot);
+      shell = shellOf(base);
+      bot._noFill = [base, base.offset(0, 1, 0)];
       await H.placeMany(bot, shell, 4);
     };
     await reseal();
