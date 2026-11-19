@@ -363,52 +363,11 @@ function sayfa (baslik, govde) {
 <title>${baslik}</title><link rel="stylesheet" href="/stil.css"></head><body>${govde}</body></html>`
 }
 
-// OBS tarayıcı kaynağı: saydam arka plan, büyük sayaç, aşama listesi.
+// OBS tarayıcı kaynağı (web/yayin.html): saydam arka plan; ?onizleme ile tarayıcıda koyu zemin.
 const YAYIN_CSP = "default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; connect-src 'self'; frame-ancestors *"
+const YAYIN_HTML = fs.readFileSync(path.join(__dirname, 'yayin.html'), 'utf8')
 function yayinSayfasi () {
-  return `<!doctype html><html lang="tr"><head><meta charset="utf-8">
-<meta name="robots" content="noindex, nofollow"><title>Yayın</title>
-<style>
-html,body{margin:0;background:transparent;color:#fff;font-family:ui-monospace,Consolas,monospace;font-weight:700}
-body{padding:12px;-webkit-text-stroke:0;text-shadow:-2px -2px 0 #000,2px -2px 0 #000,-2px 2px 0 #000,2px 2px 0 #000,0 0 6px #000}
-#sayac{font-size:84px;line-height:1}
-#asama{font-size:30px;margin:6px 0 10px;color:#ffe066}
-#seed{font-size:16px;opacity:.85}
-.satir{font-size:26px;display:flex;gap:24px;justify-content:space-between;max-width:520px}
-</style></head><body>
-<div id="sayac">0:00</div><div id="asama"></div><div id="liste"></div><div id="seed"></div>
-<script>
-const dk = (ms) => { const s = Math.floor(ms / 1000); return Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0') }
-const anahtar = new URLSearchParams(location.search).get('anahtar') || ''
-let veri = null, fark = 0
-function ciz () {
-  if (!veri) return
-  const simdi = Date.now() + fark
-  let t = 0
-  const as = veri.asamalar || []
-  if (veri.calisiyor && veri.kosuBaslangic) t = simdi - veri.kosuBaslangic
-  else if (veri.kosuBaslangic && veri.guncellendi) t = veri.guncellendi * 1000 - veri.kosuBaslangic
-  else if (as.length) t = as[as.length - 1].total
-  document.getElementById('sayac').textContent = dk(Math.max(0, t))
-  document.getElementById('asama').textContent = veri.calisiyor ? (veri.asama || '') : (veri.asama ? 'Bitti: ' + veri.asama : '')
-  document.getElementById('seed').textContent = veri.seed ? 'seed ' + veri.seed : ''
-  const l = document.getElementById('liste'); l.textContent = ''
-  for (const a of as) {
-    const d = document.createElement('div'); d.className = 'satir'
-    const x = document.createElement('span'); x.textContent = a.name
-    const y = document.createElement('span'); y.textContent = dk(a.total)
-    d.append(x, y); l.append(d)
-  }
-}
-async function cek () {
-  try {
-    const r = await fetch('/api/yayin?anahtar=' + encodeURIComponent(anahtar), { cache: 'no-store' })
-    if (r.ok) { veri = await r.json(); fark = veri.simdi - Date.now() }
-  } catch (e) { /* bağlantı yok */ }
-  ciz()
-}
-cek(); setInterval(cek, 1000); setInterval(ciz, 200)
-</script></body></html>`
+  return YAYIN_HTML
 }
 
 // Giriş yapılmamış ziyaretçi Okul Zili tanıtım sayfasını görür; kod penceresi gizli düğmeyle açılır.
@@ -631,7 +590,9 @@ async function istek (req, res) {
     const aktif = (await servisDurumu(KOSU_BIRIM)) === 'active' || (await servisDurumu(TOPLU_BIRIM)) === 'active'
     return gonder(res, 200, 'application/json; charset=utf-8', JSON.stringify({
       calisiyor: Boolean(aktif && du.calisiyor), seed: du.seed || null, asama: du.asama || null,
-      asamalar: du.asamalar || [], kosuBaslangic: du.kosuBaslangic || null, guncellendi: du.guncellendi || null, simdi: Date.now()
+      asamalar: du.asamalar || [], kosuBaslangic: du.kosuBaslangic || null, guncellendi: du.guncellendi || null, simdi: Date.now(),
+      hedef: du.hedef || null, basla: du.basla || null, can: du.can ?? null, aclik: du.aclik ?? null, boyut: du.boyut || null,
+      kafa: du.kafa || null, envanter: du.envanter || null, enIyi: enIyiAsamalar(ks.kosular)
     }))
   }
 

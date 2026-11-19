@@ -1,0 +1,119 @@
+<!doctype html><html lang="tr"><head><meta charset="utf-8">
+<meta name="robots" content="noindex, nofollow"><title>Yayın</title>
+<style>
+:root{--cam:rgba(12,14,22,.78);--kenar:rgba(255,255,255,.10);--soluk:#8b93a7;--yazi:#eef1f7;--yesil:#39d98a;--kirmizi:#ff5c6c;--altin:#ffcf4a;--mor:#b48cff;--nether:#ff6b3d;--end:#c9b6ff;--ow:#5fd068}
+html,body{margin:0;background:transparent;color:var(--yazi);font:600 15px/1.25 "Segoe UI",Inter,system-ui,sans-serif}
+body.onizleme{background:#1b1f2a repeating-conic-gradient(#242938 0 25%,#1b1f2a 0 50%) 0 0/24px 24px}
+.kart{width:350px;margin:14px;background:var(--cam);border:1px solid var(--kenar);border-radius:16px;box-shadow:0 10px 40px rgba(0,0,0,.45);backdrop-filter:blur(8px);overflow:hidden}
+.ust{display:flex;align-items:center;justify-content:space-between;padding:12px 16px 6px}
+.marka{font-size:12px;letter-spacing:.14em;text-transform:uppercase;color:var(--soluk)}
+.marka b{color:var(--yazi)}
+.boyut{font-size:11px;font-weight:700;padding:3px 9px;border-radius:99px;background:rgba(255,255,255,.08);letter-spacing:.06em;text-transform:uppercase}
+.sayac{font:800 54px/1 ui-monospace,"Cascadia Mono",Consolas,monospace;font-variant-numeric:tabular-nums;padding:2px 16px 4px;letter-spacing:-.02em;color:var(--yesil);text-shadow:0 0 18px rgba(57,217,138,.25)}
+.sayac small{font-size:26px;opacity:.75}
+.sayac.bitti{color:var(--altin);text-shadow:0 0 18px rgba(255,207,74,.3)}
+.sayac.hata{color:var(--kirmizi);text-shadow:0 0 18px rgba(255,92,108,.3)}
+.simdi{margin:0 16px 10px;padding:7px 10px;border-radius:10px;background:rgba(255,255,255,.06);font-size:13px;color:#cfd5e3;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.simdi::before{content:"▶ ";color:var(--yesil)}
+.simdi.yok::before{content:""}
+ol{list-style:none;margin:0;padding:0 8px 8px}
+li{display:grid;grid-template-columns:26px 1fr auto 62px;align-items:center;gap:6px;padding:5px 8px;border-radius:8px;color:var(--soluk)}
+li .ik{font-size:16px;text-align:center;filter:grayscale(1);opacity:.55}
+li .ad{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+li .fark{font:700 12px ui-monospace,Consolas,monospace;text-align:right}
+li .zm{font:700 14px ui-monospace,Consolas,monospace;font-variant-numeric:tabular-nums;text-align:right}
+li.tamam{color:var(--yazi)}
+li.tamam .ik{filter:none;opacity:1}
+li.aktif{background:linear-gradient(90deg,rgba(57,217,138,.18),rgba(57,217,138,.02));color:#fff}
+li.aktif .ik{filter:none;opacity:1}
+.iyi{color:var(--yesil)}.kotu{color:var(--kirmizi)}
+.alt{display:flex;flex-wrap:wrap;gap:6px;padding:10px 16px 14px;border-top:1px solid var(--kenar)}
+.can{flex-basis:100%;display:flex;gap:10px;align-items:center;font-size:12px;color:var(--soluk);margin-bottom:4px}
+.bar{flex:1;height:7px;border-radius:9px;background:rgba(255,255,255,.08);overflow:hidden}
+.bar i{display:block;height:100%;border-radius:9px;background:linear-gradient(90deg,#ff4d6d,#ff8fa3);transition:width .4s}
+.bar.ac i{background:linear-gradient(90deg,#e0a03a,#f6d27a)}
+.esya{font-size:13px;padding:4px 9px;border-radius:99px;background:rgba(255,255,255,.07);color:var(--yazi)}
+.esya b{font-variant-numeric:tabular-nums}
+.seed{padding:0 16px 12px;font:600 11px ui-monospace,Consolas,monospace;color:var(--soluk)}
+</style></head><body>
+<div class="kart">
+  <div class="ust"><div class="marka"><b>FastAuto</b> · bot speedrun</div><div class="boyut" id="boyut"></div></div>
+  <div class="sayac" id="sayac">0:00<small>.0</small></div>
+  <div class="simdi yok" id="simdi"></div>
+  <ol id="liste"></ol>
+  <div class="alt" id="alt"></div>
+  <div class="seed" id="seed"></div>
+</div>
+<script>
+const ROTA = [
+  ['🪵', 'Odun', /^Odun/], ['⛏️', 'Taş aletler', /^Taş kazma/], ['🔥', 'Nether', /^NETHER/],
+  ['🏰', 'Blaze spawner', /^Blaze spawner/], ['🟡', 'Blaze çubukları', /^Blaze \(/], ['🌲', 'Warped forest', /^Warped/],
+  ['🟣', 'Ender pearl', /^Ender pearl/], ['👁️', 'Ender gözü', /^Ender gözü/], ['🌍', 'Overworld', /^Overworld/],
+  ['🗝️', 'Portal odası', /^Portal odası/], ['🌀', 'End portalı', /^End portalı/], ['🌑', 'End', /^END'e/], ['🐉', 'Ejderha', /^EJDERHA/]
+]
+const SON = { nether: 2, blaze: 4, pearl: 7, kale: 10, ejderha: 12 }
+const ESYA = [['blaze_rod', '🟡', 'çubuk'], ['ender_pearl', '🟣', 'pearl'], ['ender_eye', '👁️', 'göz'], ['white_bed', '🛏️', 'yatak'], ['arrow', '🏹', 'ok'], ['cooked_beef', '🍖', 'et']]
+const BOYUT = { overworld: ['Overworld', 'var(--ow)'], the_nether: ['Nether', 'var(--nether)'], the_end: ['The End', 'var(--end)'] }
+const anahtar = new URLSearchParams(location.search).get('anahtar') || ''
+if (new URLSearchParams(location.search).has('onizleme')) document.body.classList.add('onizleme')
+const $ = (id) => document.getElementById(id)
+const el = (t, c, x) => { const e = document.createElement(t); if (c) e.className = c; if (x != null) e.textContent = x; return e }
+const dk = (ms, ondalik) => { const s = Math.max(0, ms) / 1000; const m = Math.floor(s / 60); const r = Math.floor(s % 60); return { ana: (m >= 60 ? Math.floor(m / 60) + ':' + String(m % 60).padStart(2, '0') : m) + ':' + String(r).padStart(2, '0'), ond: '.' + Math.floor((s * 10) % 10) } }
+const fark = (ms) => (ms < 0 ? '−' : '+') + (Math.abs(ms) >= 60000 ? dk(Math.abs(ms)).ana : (Math.abs(ms) / 1000).toFixed(1))
+let veri = null, saat = 0
+function ciz () {
+  if (!veri) return
+  const simdi = Date.now() + saat
+  const as = veri.asamalar || []
+  let t = 0
+  if (veri.calisiyor && veri.kosuBaslangic) t = simdi - veri.kosuBaslangic
+  else if (veri.kosuBaslangic && veri.guncellendi) t = veri.guncellendi * 1000 - veri.kosuBaslangic
+  else if (as.length) t = as[as.length - 1].total
+  const s = dk(t)
+  const sy = $('sayac'); sy.firstChild.textContent = s.ana; sy.lastChild.textContent = s.ond
+  const hata = !veri.calisiyor && /hata/.test(veri.asama || '')
+  sy.className = 'sayac' + (veri.calisiyor ? '' : hata ? ' hata' : ' bitti')
+  const sm = $('simdi'); const asama = veri.calisiyor ? (veri.asama || '') : (veri.asama ? (hata ? '✖ ' : '✔ ') + veri.asama.replace(/^hata: /, '') : '')
+  sm.textContent = asama; sm.className = 'simdi' + (veri.calisiyor ? '' : ' yok')
+  const b = BOYUT[veri.boyut]; const bx = $('boyut'); bx.textContent = b ? b[0] : ''; bx.style.color = b ? b[1] : ''; bx.style.display = b ? '' : 'none'
+  // Rota: hedefe kadar; test koşusunda sadece görülen aşamalardan sonrası.
+  const son = SON[veri.hedef] ?? ROTA.length - 1
+  let ilk = 0
+  if (veri.basla && veri.basla !== 'bastan') ilk = Math.max(0, ROTA.findIndex(([, , re]) => as.some((a) => re.test(a.name))))
+  if (veri.basla === 'end') ilk = 12; else if (veri.basla === 'kale') ilk = 9; else if (veri.basla === 'warped') ilk = 5
+  const l = $('liste'); l.textContent = ''
+  let aktifVerildi = false
+  for (let i = ilk; i <= son; i++) {
+    const [ik, ad, re] = ROTA[i]
+    const a = as.find((x) => re.test(x.name))
+    const pb = (veri.enIyi || []).filter((x) => re.test(x.name)).reduce((m, x) => (m == null || x.total < m ? x.total : m), null)
+    const li = el('li', a ? 'tamam' : (!aktifVerildi && veri.calisiyor ? 'aktif' : ''))
+    if (!a && veri.calisiyor) aktifVerildi = true
+    const f = el('span', 'fark', a && pb != null && veri.basla === 'bastan' ? fark(a.total - pb) : '')
+    if (a && pb != null) f.classList.add(a.total <= pb ? 'iyi' : 'kotu')
+    li.append(el('span', 'ik', ik), el('span', 'ad', ad), f, el('span', 'zm', a ? dk(a.total).ana : pb != null ? dk(pb).ana : '—'))
+    if (!a && pb != null) li.lastChild.style.opacity = '.45'
+    l.append(li)
+  }
+  const alt = $('alt'); alt.textContent = ''
+  if (veri.can != null) {
+    const c = el('div', 'can')
+    const b1 = el('div', 'bar'); const i1 = el('i'); i1.style.width = (veri.can / 20 * 100) + '%'; b1.append(i1)
+    const b2 = el('div', 'bar ac'); const i2 = el('i'); i2.style.width = ((veri.aclik || 0) / 20 * 100) + '%'; b2.append(i2)
+    c.append(el('span', null, '❤ ' + veri.can), b1, el('span', null, '🍗 ' + veri.aclik), b2); alt.append(c)
+  }
+  const env = veri.envanter || {}
+  for (const [ad, ik, ka] of ESYA) if (env[ad]) { const e = el('span', 'esya', ik + ' '); e.append(el('b', null, env[ad]), document.createTextNode(' ' + ka)); alt.append(e) }
+  if (veri.kafa === 'carved_pumpkin') alt.append(el('span', 'esya', '🎃 balkabağı'))
+  alt.style.display = alt.childNodes.length ? '' : 'none'
+  $('seed').textContent = veri.seed ? 'seed ' + veri.seed + (veri.basla && veri.basla !== 'bastan' ? ' · test: ' + veri.basla : '') : ''
+}
+async function cek () {
+  try {
+    const r = await fetch('/api/yayin?anahtar=' + encodeURIComponent(anahtar), { cache: 'no-store' })
+    if (r.ok) { veri = await r.json(); saat = veri.simdi - Date.now() }
+  } catch (e) { /* bağlantı yok */ }
+  ciz()
+}
+cek(); setInterval(cek, 1000); setInterval(ciz, 100)
+</script></body></html>

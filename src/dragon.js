@@ -291,7 +291,21 @@ async function killDragon(bot, say = () => {}, opts = {}) {
           await H.highway(bot, { x: tx, y: null, z: tz }, { range: 1, maxMs: 8000 });
         }
         const cloudNearStand = () => Object.values(bot.entities).some((e) => e.name === "area_effect_cloud" && e.position.distanceTo(stand) < 5);
-        for (let i = 0; i < 60 && cloudNearStand(); i++) await A.sleep(250);
+        // Bulut dağılana kadar boş bekleme: bu sırada kristale/ejderhaya ok at.
+        const tw = Date.now();
+        while (Date.now() - tw < 15000 && cloudNearStand() && !killed) {
+          const me = bot.entity.position;
+          const c = bow(bot) && arrows(bot) ? crystals(bot).filter((x) => !caged(bot, x) && (crystalTries.get(x.id) || 0) < 6)
+            .sort((a, b) => a.position.distanceTo(me) - b.position.distanceTo(me))[0] : null;
+          const dd = dragon(bot);
+          if (c) {
+            crystalTries.set(c.id, (crystalTries.get(c.id) || 0) + 1);
+            await shoot(bot, c, 1.0);
+            await A.sleep(400);
+            if (!bot.entities[c.id]) { crystalsBroken++; say(`  kristal patladı (${crystalsBroken}), ${crystals(bot).length} kaldı`); }
+          } else if (dd && bow(bot) && arrows(bot) > 16 && dd.position.distanceTo(me) < 40) await shoot(bot, dd, 1.5);
+          else await A.sleep(250);
+        }
         await A.goto(bot, new GoalNear(stand.x, stand.y, stand.z, 0), 8000);
         continue;
       }

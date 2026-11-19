@@ -225,7 +225,7 @@ async function netherKosu(args) {
   process.on("SIGINT", onSignal);
   process.on("SIGTERM", onSignal);
 
-  setStatus({ seed, baslangic: result.zaman, asama: "sunucu açılıyor" });
+  setStatus({ seed, baslangic: result.zaman, asama: "sunucu açılıyor", hedef: result.hedef, basla: start, envanter: null, can: null, aclik: null, boyut: null, kafa: null });
   try {
     if (!external) {
       if (serviceActive(VERIFIER))
