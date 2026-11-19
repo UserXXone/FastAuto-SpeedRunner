@@ -188,7 +188,8 @@ async function buildPillar(bot) {
         if (b && b.boundingBox === "block") { top = Math.max(top, y); break; }
       }
     }
-  const want = Math.min(8, Math.max(PILLAR, top + 1 + 3 - base.y));
+  // 8 blok denendi: enderman aşağıda kalıyor, 4,2 menzil yetişmiyor (öldürme durdu). En çok 4.
+  const want = Math.min(PILLAR + 1, Math.max(PILLAR, top + 1 + 3 - base.y));
   // Her yükselmeden önce yere inmeyi bekle (beklemeyince ikinci zıplama hep boşa gidiyordu).
   for (let i = 0; i < want + 3 && H.cellOf(bot).y < base.y + want; i++) {
     for (let k = 0; k < 20 && !bot.entity.onGround; k++) await A.sleep(50);
