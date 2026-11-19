@@ -684,4 +684,111 @@ async function enterExitPortal(bot, say = () => {}, maxMs = 90000) {
   return won || bot.game.dimension !== "the_end";
 }
 
-module.exports = { enterExitPortal, killDragon, dragon, fountainTop, perched, beds };
+
+// ---------------------------------------------------------------------------
+// Çanak taktiği (ölçümle bulundu, gözlemci botla, seed 4609152743962676157):
+// - Oyuncu fıskiyeye ≤4,5 blok yakınsa ejderha ~53 sn oturuyor (tarama → saldırı →
+//   10 sn nefes, 4 tur). 6,5 blokta 5 sn oturup üstümüze dalıyor.
+// - Nefes/ateş topu bulutu tam bizim olduğumuz yere düşüyor (yarıçap ~3): çanağın öbür
+//   yanı 5 blok ötede, güvenli.
+// - Çanağın kenarına (y = taban+4) koyulan yatak ejderhaya ~20 hasar; çanaktaki bize
+//   kenar taşları siper (patlama görüş ışınlarıyla hesaplanır).
+// Çanak: bedrock taban (y=top-4), içi |x|,|z| ≤ 2 (sütun hariç), kenar bedrock y=top-3.
+async function killDragonBowl(bot, say = () => {}, opts = {}) {
+  const maxMs = opts.maxMs || 15 * 60e3;
+  const t0 = Date.now();
+  let killed = false;
+  let bombs = 0;
+  const onDead = (e) => { if (e.name === "ender_dragon") killed = true; };
+  const onBar = (b) => { if (b && typeof b.health === "number") bot._dragonHp = b.health; };
+  bot.on("entityDead", onDead);
+  bot.on("bossBarUpdated", onBar);
+  bot.on("bossBarCreated", onBar);
+  const hpTxt = () => (bot._dragonHp != null ? Math.round(bot._dragonHp * 200) : "?");
+  try {
+    // Kristaller (testte kaldırılmış olabilir): platformdan görünenleri vur.
+    if (bow(bot) && arrows(bot)) {
+      for (let i = 0; i < 40 && !crystals(bot).length; i++) await A.sleep(250);
+      if (crystals(bot).length) {
+        const k = await shootCrystals(bot, say, opts.crystalMs || 90000);
+        say(`Kristaller (platformdan): ${k.broken} patladı, ${k.left} kaldı`);
+      }
+    }
+    const me = bot.entity.position;
+    const ang = Math.atan2(me.z, me.x);
+    const step = Math.PI / 5;
+    const gap = Math.round((ang - step / 2) / step) * step + step / 2;
+    // Kulelerin arasından tünelle fıskiyenin yakınına.
+    say("Fıskiyeye tünelle gidiyorum");
+    if (Math.hypot(me.x, me.z) > 52) {
+      const r0 = await H.longHaul(bot, { x: Math.round(Math.cos(gap) * 56), z: Math.round(Math.sin(gap) * 56) }, { range: 3, minY: 50, maxY: 72, maxMs: 400000, harvest: 1 });
+      A.dbg("End tüneli (ara nokta):", r0, H.cellOf(bot).toString());
+    }
+    // Eksen yönü: +x/−x/+z/−z'den hangisi bize yakınsa o taraftan gir.
+    const ax = Math.abs(Math.cos(gap)) >= Math.abs(Math.sin(gap)) ? [Math.sign(Math.cos(gap)), 0] : [0, Math.sign(Math.sin(gap))];
+    const r1 = await H.longHaul(bot, { x: ax[0] * 10, z: ax[1] * 10 }, { range: 2, minY: 50, maxY: 72, maxMs: 400000, harvest: 1 });
+    A.dbg("End tüneli (fıskiye önü):", r1, H.cellOf(bot).toString());
+    const top = fountainTop(bot) || 62;
+    const floorY = top - 3; // çanak içinde ayak hizası (taban bedrock top-4)
+    // Kenarın hemen dışından (3, floorY+1) çanağa in.
+    const entry = new Vec3(ax[0] * 3, floorY + 1, ax[1] * 3);
+    let r2 = await H.highway(bot, entry, { maxMs: 120000, enclosed: true, descendEarly: true });
+    A.dbg("çanak kapısı:", r2, H.cellOf(bot).toString());
+    const side = (sx, sz) => new Vec3(sx * 2, floorY, sz * 2);
+    let cur = [ax[0], ax[1]];
+    await A.goto(bot, new GoalNear(cur[0] * 2, floorY, cur[1] * 2, 0), 8000);
+    // Kapıyı kapat (yatak patlamasına siper de oluyor).
+    await H.placeMany(bot, [entry, entry.offset(0, 1, 0)], 3);
+    say(`Çanaktayım ${H.cellOf(bot)}, fıskiye tepesi ${top}`);
+    let lastLog = 0;
+    let lastDodge = 0;
+    while (!killed) {
+      if (Date.now() - t0 > maxMs) throw new Error(`Ejderha çok uzun sürdü (${bombs} yatak)`);
+      if (!beds(bot)) throw new Error(`Yatak bitti (${bombs} patlatıldı)`);
+      const d = dragon(bot);
+      const pos = bot.entity.position;
+      if (Date.now() - lastLog > 5000) {
+        lastLog = Date.now();
+        A.dbg(`ejderha can ${hpTxt()}/200 | ${d ? d.position.floored().toString() : "yok"} | ben ${H.cellOf(bot)} can ${bot.health.toFixed(0)} yatak ${beds(bot)} patlama ${bombs}`);
+      }
+      // Bulut üstümüzde: çanağın öbür yanına geç.
+      const cloud = Object.values(bot.entities).find((e) => e.name === "area_effect_cloud" && Math.hypot(e.position.x - pos.x, e.position.z - pos.z) < 3.8 && Math.abs(e.position.y - pos.y) < 2);
+      if (cloud && Date.now() - lastDodge > 1500) {
+        lastDodge = Date.now();
+        // Bulutun karşı tarafı (sütunun öbür yanı).
+        const cx = cloud.position.x, cz = cloud.position.z;
+        cur = Math.abs(cx) >= Math.abs(cz) ? [cx > 0 ? -1 : 1, 0] : [0, cz > 0 ? -1 : 1];
+        A.dbg("bulut: çanağın öbür yanına", cur.join(","));
+        await A.goto(bot, new GoalNear(cur[0] * 2, floorY, cur[1] * 2, 0), 5000);
+        continue;
+      }
+      if (d && perched(bot, top)) {
+        // Yatak bizim taraftaki kenara: (3,top-3) siper, (4,top-2) yatak ayağı (altı top-3 dolu).
+        const [sx, sz] = cur;
+        const foot = new Vec3(sx * 4, floorY + 3, sz * 4);
+        const L = { dir: [sx, sz], bedFoot: foot, supports: [] };
+        const shield = [new Vec3(sx * 3, floorY + 1, sz * 3), new Vec3(sx * 3, floorY + 2, sz * 3), foot.offset(0, -1, 0), foot.offset(sx, -1, sz)];
+        const solid = (p) => (bot.blockAt(p) || {}).boundingBox === "block";
+        if (!shield.every(solid)) await H.placeMany(bot, shield, 3);
+        const fb = bot.blockAt(foot), hb = bot.blockAt(foot.offset(sx, 0, sz));
+        if ((fb && !/_bed$/.test(fb.name) && fb.boundingBox !== "empty") || [fb, hb].some((x) => x && /fire$/.test(x.name)) || (hb && hb.boundingBox === "block")) await clearBedSpot(bot, L);
+        // Yatak başı dışarı doğru (ejderhanın gövdesine girmesin).
+        const Lo = { dir: [sx, sz], bedFoot: foot };
+        if (await bedBomb(bot, Lo)) {
+          bombs++;
+          await A.sleep(120);
+          say(`  ${new Date().toISOString().slice(14, 21)} yatak patladı (${bombs}), ejderha can ${hpTxt()}/200, ben ${bot.health.toFixed(0)}`);
+        }
+        await A.sleep(60);
+        continue;
+      }
+      if ((bot.food < 18 || (bot.health < 16 && bot.food < 20)) && C.bestFood(bot)) await C.eat(bot);
+      await A.sleep(150);
+    }
+  } finally {
+    bot.removeListener("entityDead", onDead);
+  }
+  return { killed, bombs, ms: Date.now() - t0 };
+}
+
+module.exports = { killDragonBowl, enterExitPortal, killDragon, dragon, fountainTop, perched, beds };

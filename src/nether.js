@@ -325,7 +325,7 @@ async function stageDragon(bot, timer, say, guard) {
   if (guard) guard.pause();
   let r;
   try {
-    r = await D.killDragon(bot, say);
+    r = await (process.env.EJDERHA_MOD === "eski" ? D.killDragon(bot, say) : D.killDragonBowl(bot, say));
   } finally {
     if (guard) guard.resume();
   }
