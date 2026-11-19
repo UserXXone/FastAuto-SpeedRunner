@@ -43,11 +43,18 @@ function groundAt(bot, x, z, fromY = 90) {
   return null;
 }
 
-// Ejderha fıskiyeye inmiş mi?
+// Ejderha fıskiyeye inmiş mi? Alçaktan geçerken de yakın oluyor (yatak boşa gitti):
+// son ~0,8 sn'de neredeyse kıpırdamamış olmalı.
+const trail = [];
 function perched(bot, top) {
   const d = dragon(bot);
   if (!d) return false;
   const p = d.position;
+  const now = Date.now();
+  trail.push({ t: now, p: p.clone() });
+  while (trail.length && now - trail[0].t > 800) trail.shift();
+  const moved = trail.length ? trail[0].p.distanceTo(p) : 99;
+  if (now - (trail[0] ? trail[0].t : now) < 500 || moved > 1.0) return false;
   // İnince gövde tam ortada durmuyor (ölçüldü: (2, 64, 5) gibi; kafası bize dönük).
   return Math.hypot(p.x, p.z) < 8 && p.y < top + 6;
 }
@@ -481,7 +488,7 @@ async function killDragon(bot, say = () => {}, opts = {}) {
           bombs++;
           await A.sleep(150);
           const hx = d.position.x - Math.sin(d.yaw) * 6.5, hz = d.position.z - Math.cos(d.yaw) * 6.5;
-          say(`  yatak patladı (${bombs}), ejderha ${d.position.y.toFixed(0)}, can ${bot._dragonHp != null ? Math.round(bot._dragonHp * 200) : "?"}/200, kafa~(${hx.toFixed(1)}, ${hz.toFixed(1)}) yatak ${L.bedFoot.x},${L.bedFoot.z}`);
+          say(`  ${new Date().toISOString().slice(14, 21)} yatak patladı (${bombs}), ejderha ${d.position.y.toFixed(0)}, can ${bot._dragonHp != null ? Math.round(bot._dragonHp * 200) : "?"}/200, kafa~(${hx.toFixed(1)}, ${hz.toFixed(1)}) yatak ${L.bedFoot.x},${L.bedFoot.z}`);
         }
         await A.sleep(120);
       } else {
