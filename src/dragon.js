@@ -52,14 +52,14 @@ function perched(bot, top) {
   const p = d.position;
   const now = Date.now();
   trail.push({ t: now, p: p.clone() });
-  while (trail.length && now - trail[0].t > 800) trail.shift();
+  while (trail.length && now - trail[0].t > 500) trail.shift();
   const moved = trail.length ? trail[0].p.distanceTo(p) : 99;
   const near = Math.hypot(p.x, p.z) < 8 && p.y < top + 6;
   if (near && (!bot._perchLog || now - bot._perchLog > 1000)) {
     bot._perchLog = now;
     A.dbg(`iniş?: ${p.x.toFixed(1)},${p.y.toFixed(1)},${p.z.toFixed(1)} kıpırdama ${moved.toFixed(2)} süre ${now - trail[0].t} tepe ${top}`);
   }
-  if (now - (trail[0] ? trail[0].t : now) < 500 || moved > 2.5) return false;
+  if (now - (trail[0] ? trail[0].t : now) < 300 || moved > 1.5) return false;
   // İnince gövde tam ortada durmuyor (ölçüldü: (2, 64, 5) gibi; kafası bize dönük).
   return Math.hypot(p.x, p.z) < 8 && p.y < top + 6;
 }
@@ -98,6 +98,7 @@ async function reachCenter(bot, dist = 7, say = () => {}) {
 
 // Duruş yerinin fıskiye yönündeki iki hücre: duvar (1 blok önde, 2 yüksek) ve yatak yeri (2 blok önde).
 const BED_RAISE = Number(process.env.BED_RAISE || 2);
+const POPUP = process.env.EJDERHA_CIK === "1"; // inişte yüzeye çık (deneysel)
 function layout(stand) {
   const d = Math.hypot(stand.x, stand.z) || 1;
   const ux = -stand.x / d;
@@ -139,6 +140,22 @@ async function clearBedSpot(bot, L) {
   await H.placeMany(bot, [...(L.supports || []), L.bedFoot.offset(0, -1, 0), L.bedFoot.offset(dx, -1, dz)], 4);
 }
 
+// Yatağı yerine koy (tıklamadan).
+async function placeBed(bot, L) {
+  const [dx, dz] = L.dir;
+  const item = bot.inventory.items().find(isBed);
+  const ground = bot.blockAt(L.bedFoot.offset(0, -1, 0));
+  if (!item || !ground || ground.boundingBox !== "block") return false;
+  const spot = bot.blockAt(L.bedFoot);
+  if (spot && spot.boundingBox === "block") return false;
+  await A.withHand(bot, async () => {
+    await bot.equip(item, "hand");
+    await bot.look(Math.atan2(-dx, -dz), 0, true);
+    try { await bot._placeBlockWithOptions(ground, new Vec3(0, 1, 0), { forceLook: "ignore", swingArm: "right" }); } catch (err) { /* */ }
+  });
+  return Boolean(bot.blockAt(L.bedFoot)?.name?.endsWith("_bed"));
+}
+
 // Yatak koy (ayağı bedFoot'ta, başı fıskiye yönünde) ve hemen tıkla.
 async function bedBomb(bot, L) {
   const [dx, dz] = L.dir;
@@ -147,6 +164,10 @@ async function bedBomb(bot, L) {
   const ground = bot.blockAt(L.bedFoot.offset(0, -1, 0));
   if (!ground || ground.boundingBox !== "block") { A.dbg("yatak zemini yok:", L.bedFoot.toString()); return false; }
   let ok = false;
+  const ready = bot.blockAt(L.bedFoot);
+  if (ready && /_bed$/.test(ready.name)) {
+    try { await bot.activateBlock(ready); return true; } catch (err) { A.dbg("yatak tıklanamadı:", err.message); }
+  }
   await A.withHand(bot, async () => {
     await bot.equip(item, "hand");
     // Yatağın yönü bakış yönümüzden gelir: fıskiyeye bak.
@@ -524,7 +545,9 @@ async function killDragon(bot, say = () => {}, opts = {}) {
       }
       // İniyor mu? Fıskiyeye yakın ve alçakta: yüzeye çık ki bizi görüp otursun.
       const landing = d && Math.hypot(d.position.x, d.position.z) < 14 && d.position.y < top + 12;
-      if (!up && landing && Date.now() - upAt > 3000) { await popUp(); continue; }
+      if (POPUP && !up && landing && Date.now() - upAt > 3000) { await popUp(); continue; }
+      // Yatak hazırda dursun: ejderha oturunca sadece tıklarız (görmezse 5 sn oturuyor).
+      if (!up && !bot.blockAt(L.bedFoot)?.name?.endsWith("_bed") && beds(bot) && (!d || !perched(bot, top))) await placeBed(bot, L);
       if (up && !landing && Date.now() - upAt > 6000) { await dropDown("ejderha kalktı"); continue; }
       if (d && perched(bot, top)) {
         // İniş ~50 sn: art arda patlat (duvarı sadece yıkıldıysa onar). Yavaş kalınca
@@ -537,7 +560,8 @@ async function killDragon(bot, say = () => {}, opts = {}) {
         const spot = bot.blockAt(L.bedFoot);
         const head = bot.blockAt(L.bedFoot.offset(ddx, 0, ddz));
         const fiery = [spot, head].some((x) => x && /fire$/.test(x.name));
-        if (!under.every(solid) || fiery || (spot && spot.boundingBox === "block")) await clearBedSpot(bot, L);
+        const ready = spot && /_bed$/.test(spot.name);
+        if (!ready && (!under.every(solid) || fiery || (spot && spot.boundingBox === "block"))) await clearBedSpot(bot, L);
         let done;
         if (up) {
           if (!sideWall.every(solid)) await H.placeMany(bot, sideWall, 2);
@@ -550,11 +574,10 @@ async function killDragon(bot, say = () => {}, opts = {}) {
         }
         if (done) {
           bombs++;
-          await A.sleep(150);
           const hx = d.position.x - Math.sin(d.yaw) * 6.5, hz = d.position.z - Math.cos(d.yaw) * 6.5;
           say(`  ${new Date().toISOString().slice(14, 21)} yatak patladı (${bombs}), ejderha ${d.position.y.toFixed(0)}, can ${bot._dragonHp != null ? Math.round(bot._dragonHp * 200) : "?"}/200, kafa~(${hx.toFixed(1)}, ${hz.toFixed(1)}) yatak ${L.bedFoot.x},${L.bedFoot.z}`);
         }
-        await A.sleep(120);
+        await A.sleep(40);
       } else {
         if (bot.food < 18 && C.bestFood(bot)) await C.eat(bot);
         // Havada: önce kafessiz kristaller (iyileştiriyorlar, dururken ejderha az iniyor),
