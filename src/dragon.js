@@ -57,10 +57,19 @@ function perched(bot, top) {
  */
 async function reachCenter(bot, dist = 7, say = () => {}) {
   const me = bot.entity.position;
-  const d = Math.hypot(me.x, me.z) || 1;
-  const sx = Math.round((me.x / d) * dist);
-  const sz = Math.round((me.z / d) * dist);
-  say(`Adanın ortasına gidiyorum (${sx}, ${sz})`);
+  // Obsidyen kuleler 42 blok yarıçapta, 0°, 36°, 72°... açılarında (vanilla SpikeFeature):
+  // düz giden tünel x ekseninde kuleye çarpıp takılıyordu. İki kulenin arasından geç.
+  const ang = Math.atan2(me.z, me.x);
+  const step = Math.PI / 5;
+  const gap = Math.round((ang - step / 2) / step) * step + step / 2;
+  const sx = Math.round(Math.cos(gap) * dist);
+  const sz = Math.round(Math.sin(gap) * dist);
+  say(`Adanın ortasına gidiyorum (${sx}, ${sz}), kuleler arasından`);
+  if (Math.hypot(me.x, me.z) > 52) {
+    const wx = Math.round(Math.cos(gap) * 56), wz = Math.round(Math.sin(gap) * 56);
+    const r0 = await H.longHaul(bot, { x: wx, z: wz }, { range: 3, minY: 50, maxY: 72, maxMs: 400000, harvest: 1 });
+    A.dbg("End tüneli (ara nokta):", r0, H.cellOf(bot).toString());
+  }
   // Baştan sona kapalı tünel (çoğu yer altında): açıkta yürürken ejderha görüp ateş
   // topu atıyor, defalarca yolda öldük. Tünelin içi görünmez.
   let r = await H.longHaul(bot, { x: sx, z: sz }, { range: 2, minY: 50, maxY: 72, maxMs: 900000, harvest: 1 });
