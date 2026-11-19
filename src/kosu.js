@@ -298,6 +298,13 @@ async function netherKosu(args) {
       await rcon.komut("execute in minecraft:the_end run fill 98 49 -2 102 51 2 air");
       await rcon.komut(`execute in minecraft:the_end run tp ${username} 100.5 49 0.5`);
       await rcon.komut(`item replace entity ${username} armor.head with carved_pumpkin`);
+      // Kristaller dururken ejderha nadiren iniyor (15 dk'da hiç inmedi). Yatak
+      // patlatmayı ölçmek için testte kristaller kaldırılabilir: --kristal-yok
+      if (args["kristal-yok"]) {
+        await rcon.komut("execute in minecraft:the_end run forceload add -48 -48 48 48");
+        await sleep(3000);
+        console.log("TEST: kristaller:", await rcon.komut("execute in minecraft:the_end run kill @e[type=minecraft:end_crystal]"));
+      }
       await sleep(4000);
     }
 
