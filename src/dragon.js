@@ -580,8 +580,10 @@ async function killDragon(bot, say = () => {}, opts = {}) {
       // Açık mod: ejderha uçarken yakınımızdaysa (ateş topu menzili ~64) sığınağa in;
       // uzaktaysa ya da oturuyorsa yukarıda dur (görünmezsek inmiyor).
       const dd = d ? d.position.distanceTo(bot.entity.position) : 999;
-      if (OPEN && up && !sitting && dd < 60) { await dropDown("ejderha uçarak yaklaşıyor"); downAt = Date.now(); continue; }
-      if (OPEN && !up && (sitting || dd >= 64) && Date.now() - downAt > 2500) {
+      // Ateş topu bize doğru geliyorsa hemen in (uçuşu 1-2 sn).
+      const fb = Object.values(bot.entities).find((e) => e.name === "dragon_fireball" && e.position.distanceTo(bot.entity.position) < 45);
+      if (OPEN && up && (fb || (!sitting && dd < 28))) { await dropDown(fb ? "ateş topu" : "ejderha yakın"); downAt = Date.now(); continue; }
+      if (OPEN && !up && !fb && (sitting || dd >= 40) && Date.now() - downAt > 2500) {
         const cl = Object.values(bot.entities).some((e) => e.name === "area_effect_cloud" && e.position.distanceTo(top2) < 7);
         if (!cl) { await popUp(); continue; }
       }
