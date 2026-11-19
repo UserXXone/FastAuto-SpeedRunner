@@ -345,15 +345,15 @@ async function killDragon(bot, say = () => {}, opts = {}) {
     // (kaçmaya çalışırken defalarca öldük). Duvar da 4 blok: patlama bize gelmesin.
     const [wx, wz] = L.dir;
     L.wall = [0, 1, 2, 3].map((dy) => stand.offset(wx, dy, wz));
-    for (let i = 0; i < 5 && H.cellOf(bot).y < stand.y + 2; i++) await H.pillarUp(bot);
+    // Direk yok: kapsül yerde. Kapalıyken ejderha bizi görmüyor, ne ateş topu atıyor ne
+    // nefes hücumuna geçiyor. Direğe çıkarken (~2 sn açıkta) her seferinde vurulduk.
     const perch = H.cellOf(bot);
     A.dbg("ejderha duruşu:", perch.toString(), "yükseklik", perch.y - stand.y);
-    await H.placeMany(bot, L.wall, 4);
-    // Kapsül: direğin tepesinde dört yan + tavan. Ejderha görmediği oyuncuya ateş topu
+    // Kapsül: zemin, dört yan + tavan. Ejderha görmediği oyuncuya ateş topu
     // atmıyor ve nefes hücumuna geçmiyor (hedef seçerken görüş hattına bakıyor). Ateş
-    // topları açıktayken bizi defalarca öldürdü. Yatağı kapsülün dışına, yere koyup
+    // topları açıktayken bizi defalarca öldürdü. Yatağı kapsülün dışına, desteğin üstüne koyup
     // tıklarız (sunucu mesafeye bakar, görüşe değil).
-    const shell = [];
+    const shell = [perch.offset(0, -1, 0)];
     for (const [sx, sz] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) shell.push(perch.offset(sx, 0, sz));
     for (const [sx, sz] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) shell.push(perch.offset(sx, 1, sz));
     // Tavan yan bloklara çapraz kalıyor, tutunamaz: önce yanına bir köprü bloğu.
@@ -363,6 +363,7 @@ async function killDragon(bot, say = () => {}, opts = {}) {
       if (shell.some((c) => (bot.blockAt(c) || {}).boundingBox !== "block")) await H.placeMany(bot, shell, 4);
     };
     await reseal();
+    await H.placeMany(bot, L.wall, 4);
     await clearBedSpot(bot, L);
     // Kristalleri döngü içinde, ejderha havadayken teker teker vururuz: kristale
     // kilitlenip inen ejderhayı kaçırıyorduk.
