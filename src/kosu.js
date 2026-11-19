@@ -184,8 +184,10 @@ async function netherKosu(args) {
   const endTest = args.basla === "end"; // doğrudan End: ejderha (yataklar verilir)
   if (endTest) args.hedef = "ejderha";
   const warpedTest = args.basla === "warped"; // doğrudan enderman avı (Nether'a ışınlar)
+  const bastionTest = args.basla === "bastion";
+  if (bastionTest && !["pearl", "kale"].includes(args.hedef)) args.hedef = "pearl";
   if (warpedTest && !["pearl", "kale"].includes(args.hedef)) args.hedef = "pearl";
-  const start = kaleTest ? "kale" : endTest ? "end" : warpedTest ? "warped" : args.basla === "portal" || cast ? "portal" : "bastan";
+  const start = kaleTest ? "kale" : endTest ? "end" : bastionTest ? "bastion" : warpedTest ? "warped" : args.basla === "portal" || cast ? "portal" : "bastan";
   const external = Boolean(args.host);
   if (!external && (!args.seed || args.seed === true))
     throw new Error("--seed vermelisin. Örnek: npm run nether -- --seed 123");
@@ -331,6 +333,13 @@ async function netherKosu(args) {
       for (const it of ["stone_pickaxe", "stone_pickaxe", "stone_pickaxe", "stone_sword", "netherrack 128", "cooked_beef 12", "blaze_rod 6"]) await rcon.komut(`give ${username} ${it}`);
       await rcon.komut(`item replace entity ${username} armor.feet with golden_boots`); // piglinler saldırmasın (gerçek koşuda yıkık portal sandığından)
       await rcon.komut(`execute in minecraft:the_nether run spreadplayers ${tx} ${tz} 0 8 under 100 false ${username}`);
+      await sleep(4000);
+    }
+
+    if (bastionTest && rcon) {
+      console.log("TEST: Nether bastion çevresine ışınlanıyor.");
+      for (const it of ["stone_pickaxe", "stone_pickaxe", "stone_pickaxe", "stone_sword", "netherrack 128", "cooked_beef 12", "crafting_table", "blaze_rod 6"]) await rcon.komut(`give ${username} ${it}`);
+      await rcon.komut(`execute in minecraft:the_nether run spreadplayers 40 -70 0 6 under 100 false ${username}`);
       await sleep(4000);
     }
 

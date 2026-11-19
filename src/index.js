@@ -29,7 +29,7 @@ Koşu seçenekleri (kos):
 Nether koşusu (nether) — Minecraft 1.21.1, sunucuyu kendi açar:
   --seed <seed>        Panelde görünen bir seed (yapı konumları oradan okunur)
   --portal <x,z>       Yıkık portalın yeri (seed panelde yoksa)
-  --basla portal|kale|warped|end  TEST: portalın yanında | 12 gözle kalede | warped forest içinde | End'de yataklarla ejderha
+  --basla portal|kale|warped|bastion|end  TEST: portalın yanında | 12 gözle kalede | warped forest | bastion çevresinde takas | End'de ejderha
   --hedef <aşama>      nether | blaze (varsayılan) | pearl | kale (son ikisi deneysel)
   --izle <saniye>      Koşu bitince sunucuyu bu kadar açık tut
   --tut                Koşudan sonra dünyayı silme (kosu/dunya)

@@ -11,6 +11,7 @@ const {
 const A = require("./actions");
 const P = require("./portal");
 const S = require("./speedrun");
+const B = require("./barter");
 const C = require("./combat");
 const F = require("./fortress");
 const H = require("./highway");
@@ -233,6 +234,23 @@ async function stageFortress(bot, info, timer, say, guard) {
 
 // Warped forest'a kapalı tünelle git, enderman avla, ender gözlerini yap.
 async function stagePearls(bot, info, timer, say, guard) {
+  let need = 12;
+  if (info.seed) {
+    try { const fs=require("fs"), p=`kosu/rota/${info.seed}.json`; if(fs.existsSync(p)) need=B.neededEyes(JSON.parse(fs.readFileSync(p,"utf8")).overworld?.portalOdasi?.takiliGoz||0); } catch (_) {}
+  }
+  if (info.bastion && Math.hypot(info.bastion[0]-bot.entity.position.x,info.bastion[1]-bot.entity.position.z)<250) {
+    let nuggets=A.count(bot,"gold_nugget");
+    if(nuggets<9){nuggets=await B.mineGold(bot,Math.max(18,need*36),say);timer.split(`Altın (${Math.floor(nuggets/9)} külçe)`);}
+    if(nuggets>=9){const tb=await A.ensureTable(bot);await A.craft(bot,"gold_ingot",Math.floor(nuggets/9),tb);} // masa verilmezse 3x3 tarif yapılamıyordu
+    if(A.count(bot,"gold_ingot")>=4 && !C.wearsGold(bot)){await A.craft(bot,"golden_boots",1,await A.ensureTable(bot));const boots=bot.inventory.items().find(i=>i.name==="golden_boots");if(boots)await bot.equip(boots,"feet");}
+    if(A.count(bot,"gold_ingot")) {const res=await B.barter(bot,need,say,{bastion:{x:info.bastion[0],z:info.bastion[1]}});timer.split(`Takas (${res.pearls} pearl)`);need=Math.max(0,need-res.pearls);}
+  }
+  // Takas yettiyse avı atla ama gözleri yine yap.
+  if (need <= 0) {
+    const eyes0 = await E.craftEyes(bot);
+    timer.split(`Ender gözü (${eyes0})`);
+    return;
+  }
   // Ormanın içi: 48 blok içinde en az 600 açık nylium (kenarda ~25, içeride ~2500).
   const DENSE = 600;
   const dense = () => E.openNylium(bot, 48).length >= DENSE;
@@ -278,7 +296,7 @@ async function stagePearls(bot, info, timer, say, guard) {
   guard.pause();
   let res;
   try {
-    res = await E.huntEndermen(bot, E.PEARLS_NEEDED, say);
+    res = await E.huntEndermen(bot, need, say);
   } finally {
     guard.resume();
   }
@@ -376,6 +394,11 @@ async function run(bot, info, opts = {}) {
     }
     if (opts.start === "warped") {
       // Test kısayolu: doğrudan enderman avı ve göz yapımı.
+      await stagePearls(bot, info, timer, say, guard);
+      say(`🟢 Ender gözleri hazır. Süre: ${fmt(timer.elapsed())}`);
+      return timer;
+    }
+    if (opts.start === "bastion") {
       await stagePearls(bot, info, timer, say, guard);
       say(`🟢 Ender gözleri hazır. Süre: ${fmt(timer.elapsed())}`);
       return timer;
