@@ -454,14 +454,13 @@ async function killDragon(bot, say = () => {}, opts = {}) {
     };
     const digCell = async (c) => {
       const b = bot.blockAt(c);
-      if (!b || b.boundingBox !== "block" || b.name === "bedrock") return;
+      if (!b || b.boundingBox !== "block" || b.name === "bedrock") { A.dbg("kazılacak blok yok:", c.toString(), b && b.name); return; }
       try {
-        await A.withHand(bot, async () => {
-          const { item } = A.fastestTool(bot, b);
-          if (item && (!bot.heldItem || bot.heldItem.type !== item.type)) await bot.equip(item, "hand");
-          await bot.dig(b, true);
-        });
-      } catch (err) { /* */ }
+        // withHand kuyruğunu beklemeden (başka iş eli tutuyorsa takılıyorduk): doğrudan kaz.
+        const { item } = A.fastestTool(bot, b);
+        if (item && (!bot.heldItem || bot.heldItem.type !== item.type)) await bot.equip(item, "hand");
+        await bot.dig(b, true);
+      } catch (err) { A.dbg("kazılamadı:", c.toString(), b.name, err.message); }
     };
     // Yüzeye çık: tavanı kaz, iki blok yüksel. Ejderha görmediği oyuncu için fıskiyede
     // ancak 5 sn oturuyor; görünce ~30-50 sn oturup nefes atıyor (yatak zamanı).
