@@ -176,10 +176,21 @@ function onPillar(bot) {
 async function buildPillar(bot) {
   if (bot._pillarTop && H.cellOf(bot).equals(bot._pillarTop)) return true;
   for (let i = 0; i < 20 && !bot.entity.onGround; i++) await A.sleep(50);
-  for (let i = 0; i < PILLAR + 2; i++) {
-    if (!(await H.pillarUp(bot))) break;
-    if (i >= PILLAR - 1 && onPillar(bot)) break;
-  }
+  // Yükseklik: çevredeki (5x5) en yüksek zeminden en az 4 blok yukarıda dur. Enderman
+  // 2,9 boyunda; 3 blokta, yandaki yüksek zeminden ve sekmeyle vurup düşürdü.
+  const base = H.cellOf(bot);
+  bot._pillarBaseY = base.y;
+  let top = base.y - 1;
+  for (let dx = -2; dx <= 2; dx++)
+    for (let dz = -2; dz <= 2; dz++) {
+      if (!dx && !dz) continue;
+      for (let y = base.y + 4; y >= base.y - 2; y--) {
+        const b = bot.blockAt(new Vec3(base.x + dx, y, base.z + dz));
+        if (b && b.boundingBox === "block") { top = Math.max(top, y); break; }
+      }
+    }
+  const want = Math.max(PILLAR + 1, top + 1 + 4 - base.y);
+  for (let i = 0; i < Math.min(want, 9); i++) if (!(await H.pillarUp(bot))) break;
   const ok = onPillar(bot);
   bot._pillarTop = ok ? H.cellOf(bot) : null;
   if (!ok) {
@@ -192,12 +203,10 @@ async function buildPillar(bot) {
 // Direkten in (altımızı kazarak): yere düşen pearl'leri almak için.
 async function leavePillar(bot) {
   bot._pillarTop = null;
-  for (let i = 0; i < PILLAR + 1; i++) {
+  const baseY = bot._pillarBaseY;
+  for (let i = 0; i < 12 && baseY != null && H.cellOf(bot).y > baseY; i++) {
     const below = bot.blockAt(H.cellOf(bot).offset(0, -1, 0));
-    if (!below || below.boundingBox !== "block" || !H.MINEABLE.has(below.name)) break;
-    // Altında bizim koyduğumuz blok değil, doğal zemin varsa dur.
-    const under = bot.blockAt(below.position.offset(0, -1, 0));
-    if (under && under.boundingBox === "block" && i >= PILLAR - 1) break;
+    if (!below || below.boundingBox !== "block") break;
     try {
       await A.withHand(bot, async () => {
         const { item } = A.fastestTool(bot, below);
@@ -450,7 +459,11 @@ async function huntEndermen(bot, need, say, opts = {}) {
       }
       if (!inReach && (bot.food < 18 || (bot.health < 14 && bot.food < 20)) && C.bestFood(bot)) await C.eat(bot);
       // Vurulduysak kapsülde delik var: kapat.
-      if (bot.health < lastHp) await shelter(bot);
+      if (bot.health < lastHp) {
+        // Direkteyken vurulduk: bir blok daha yüksel.
+        if (MODE === "direk" && bot._pillarTop) { await H.pillarUp(bot); bot._pillarTop = H.cellOf(bot); }
+        else await shelter(bot);
+      }
       lastHp = bot.health;
       await A.sleep(50);
     }
