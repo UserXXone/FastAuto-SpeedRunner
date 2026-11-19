@@ -91,17 +91,19 @@ async function reachCenter(bot, dist = 7, say = () => {}) {
 }
 
 // Duruş yerinin fıskiye yönündeki iki hücre: duvar (1 blok önde, 2 yüksek) ve yatak yeri (2 blok önde).
+const BED_RAISE = Number(process.env.BED_RAISE || 2);
 function layout(stand) {
   const d = Math.hypot(stand.x, stand.z) || 1;
   const ux = -stand.x / d;
   const uz = -stand.z / d;
   // Eksene yuvarla: duvar ve yatak düz bir hatta olsun.
   const [dx, dz] = Math.abs(ux) >= Math.abs(uz) ? [Math.sign(ux), 0] : [0, Math.sign(uz)];
-  return {
-    dir: [dx, dz],
-    wall: [stand.offset(dx, 0, dz), stand.offset(dx, 1, dz)],
-    bedFoot: stand.offset(dx * 2, 0, dz * 2),
-  };
+  // Yatak yerden 2 blok yukarıda (direğimizin hizasında): ejderhanın kafası inişte
+  // yüksekte duruyor; yerdeki yatak kafaya ~7 blok kalıyor, hasar ~5 (ölçüldü).
+  const bedFoot = stand.offset(dx * 2, BED_RAISE, dz * 2);
+  const supports = [];
+  for (let i = 0; i < BED_RAISE; i++) supports.push(stand.offset(dx * 2, i, dz * 2), stand.offset(dx * 3, i, dz * 3));
+  return { dir: [dx, dz], wall: [stand.offset(dx, 0, dz), stand.offset(dx, 1, dz)], bedFoot, supports };
 }
 
 // Tünelin kapalı tavanını/yanlarını aç: ejderhayı görmemiz gerekmiyor ama yatak
@@ -127,8 +129,8 @@ async function clearBedSpot(bot, L) {
       } catch (err) { A.dbg("yatak yeri açılamadı:", c.toString(), err.message); }
     }
   }
-  // Yatağın altı sağlam olmalı.
-  await H.placeMany(bot, [L.bedFoot.offset(0, -1, 0), L.bedFoot.offset(dx, -1, dz)], 3);
+  // Yatağın altı sağlam olmalı (yükseltilmişse destek sütunları).
+  await H.placeMany(bot, [...(L.supports || []), L.bedFoot.offset(0, -1, 0), L.bedFoot.offset(dx, -1, dz)], 4);
 }
 
 // Yatak koy (ayağı bedFoot'ta, başı fıskiye yönünde) ve hemen tıkla.
@@ -280,7 +282,7 @@ async function shoot(bot, target, height = 0.5, opts = {}) {
     bot.activateItem(); // germeye başla
     await A.sleep(1100);
     const s1 = aim();
-    if (!s1 || bot.world.raycast(s1.eye, s1.dir, 4, (bl) => bl && bl.boundingBox === "block")) { bot.deactivateItem(); return; }
+    if (!s1) { bot.deactivateItem(); return; }
     await bot.look(s1.yaw, s1.pitch, true);
     await A.sleep(60);
     bot.deactivateItem(); // bırak
@@ -343,7 +345,7 @@ async function killDragon(bot, say = () => {}, opts = {}) {
     // (kaçmaya çalışırken defalarca öldük). Duvar da 4 blok: patlama bize gelmesin.
     const [wx, wz] = L.dir;
     L.wall = [0, 1, 2, 3].map((dy) => stand.offset(wx, dy, wz));
-    for (let i = 0; i < 2; i++) if (!(await H.pillarUp(bot))) break;
+    for (let i = 0; i < 5 && H.cellOf(bot).y < stand.y + 2; i++) await H.pillarUp(bot);
     const perch = H.cellOf(bot);
     A.dbg("ejderha duruşu:", perch.toString(), "yükseklik", perch.y - stand.y);
     await H.placeMany(bot, L.wall, 4);
@@ -421,7 +423,7 @@ async function killDragon(bot, say = () => {}, opts = {}) {
         if (await bedBomb(bot, L)) {
           bombs++;
           await A.sleep(150);
-          const hx = d.position.x + Math.sin(d.yaw) * 6.5, hz = d.position.z + Math.cos(d.yaw) * 6.5;
+          const hx = d.position.x - Math.sin(d.yaw) * 6.5, hz = d.position.z - Math.cos(d.yaw) * 6.5;
           say(`  yatak patladı (${bombs}), ejderha ${d.position.y.toFixed(0)}, can ${bot._dragonHp != null ? Math.round(bot._dragonHp * 200) : "?"}/200, kafa~(${hx.toFixed(1)}, ${hz.toFixed(1)}) yatak ${L.bedFoot.x},${L.bedFoot.z}`);
         }
         await A.sleep(120);
