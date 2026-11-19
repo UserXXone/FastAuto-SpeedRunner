@@ -8,6 +8,8 @@ seed-avcisi/yuklenen/
 dogrulama/sunucu/
 dogrulama/dunya/
 dogrulama/veri/
-kosu/
+kosu/veri/
+kosu/dunya/
+kosu/rota/
 seed-avcisi/toplam.env
 kosu/veri/son-kosu.log
