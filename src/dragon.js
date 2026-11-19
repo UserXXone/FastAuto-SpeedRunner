@@ -334,7 +334,14 @@ async function killDragon(bot, say = () => {}, opts = {}) {
     const L = layout(stand);
     say(`Duruş ${stand}, fıskiye tepesi y=${top}, yatak ${L.bedFoot}`);
     await openTube(bot, stand, L);
-    await H.placeMany(bot, L.wall, 3);
+    // 2 blok yüksel: nefes bulutu yerde ve 0,5 blok yüksek; üstünde kalınca dokunmaz
+    // (kaçmaya çalışırken defalarca öldük). Duvar da 4 blok: patlama bize gelmesin.
+    const [wx, wz] = L.dir;
+    L.wall = [0, 1, 2, 3].map((dy) => stand.offset(wx, dy, wz));
+    for (let i = 0; i < 2; i++) if (!(await H.pillarUp(bot))) break;
+    const perch = H.cellOf(bot);
+    A.dbg("ejderha duruşu:", perch.toString(), "yükseklik", perch.y - stand.y);
+    await H.placeMany(bot, L.wall, 4);
     await clearBedSpot(bot, L);
     // Kristalleri döngü içinde, ejderha havadayken teker teker vururuz: kristale
     // kilitlenip inen ejderhayı kaçırıyorduk.
@@ -350,7 +357,8 @@ async function killDragon(bot, say = () => {}, opts = {}) {
         A.dbg(`ejderha can ${bot._dragonHp != null ? Math.round(bot._dragonHp * 200) : "?"}/200 |`, `${d ? `${d.position.x.toFixed(0)},${d.position.y.toFixed(0)},${d.position.z.toFixed(0)}` : "yok"} can ${bot.health.toFixed(0)} yatak ${beds(bot)} patlama ${bombs}`);
       }
       // Ejderha ateş topunun mor bulutu (nefes) üstümüzdeyse kaç: içinde durunca öldük.
-      const cloud = Object.values(bot.entities).find((e) => e.name === "area_effect_cloud" && e.position.distanceTo(bot.entity.position) < 6);
+      // Bulut yerde: ayağımız ondan 1,5 blok yukarıdaysa (direkteyiz) dokunmaz.
+      const cloud = Object.values(bot.entities).find((e) => e.name === "area_effect_cloud" && bot.entity.position.y - e.position.y < 1.5 && e.position.distanceTo(bot.entity.position) < 6);
       if (cloud) {
         // Bulutun merkezi tam üstümüzdeyse "uzağı" yok: fıskiyeden dışarı doğru kaç.
         let away = bot.entity.position.minus(cloud.position);
@@ -378,6 +386,7 @@ async function killDragon(bot, say = () => {}, opts = {}) {
           else await A.sleep(250);
         }
         await A.goto(bot, new GoalNear(stand.x, stand.y, stand.z, 0), 8000);
+        for (let i = 0; i < 2 && H.cellOf(bot).y < perch.y; i++) if (!(await H.pillarUp(bot))) break;
         continue;
       }
       if (d && perched(bot, top)) {
@@ -395,7 +404,8 @@ async function killDragon(bot, say = () => {}, opts = {}) {
         if (await bedBomb(bot, L)) {
           bombs++;
           await A.sleep(150);
-          say(`  yatak patladı (${bombs}), ejderha ${d.position.y.toFixed(0)}, can ${bot._dragonHp != null ? Math.round(bot._dragonHp * 200) : "?"}/200`);
+          const hx = d.position.x + Math.sin(d.yaw) * 6.5, hz = d.position.z + Math.cos(d.yaw) * 6.5;
+          say(`  yatak patladı (${bombs}), ejderha ${d.position.y.toFixed(0)}, can ${bot._dragonHp != null ? Math.round(bot._dragonHp * 200) : "?"}/200, kafa~(${hx.toFixed(1)}, ${hz.toFixed(1)}) yatak ${L.bedFoot.x},${L.bedFoot.z}`);
         }
         await A.sleep(120);
       } else {
