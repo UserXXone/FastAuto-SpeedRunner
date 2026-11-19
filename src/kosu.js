@@ -270,6 +270,16 @@ async function netherKosu(args) {
     console.log(`Bağlandı (Minecraft ${bot.version}).`);
     watchHealth(bot);
     if (rcon) izleyiciTakip(bot, rcon, username);
+    // Panelde görünsün: envanter, can, açlık (5 sn'de bir).
+    const envT = setInterval(() => {
+      try {
+        const say = {};
+        for (const it of bot.inventory.items()) say[it.name] = (say[it.name] || 0) + it.count;
+        const kafa = bot.inventory.slots[5];
+        setStatus({ envanter: say, can: Math.round(bot.health), aclik: bot.food, boyut: bot.game.dimension, kafa: kafa ? kafa.name : null });
+      } catch { /* */ }
+    }, 5000);
+    bot.once("end", () => clearInterval(envT));
     const failed = new Promise((_, reject) => {
       bot.once("death", () => reject(new Error("Bot öldü")));
       bot.once("end", (r) => reject(new Error("Bağlantı koptu: " + r)));

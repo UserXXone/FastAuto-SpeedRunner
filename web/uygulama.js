@@ -163,6 +163,11 @@ function kosuCiz (k) {
     kutu.append(dl)
   }
   if (du && (du.notlar || []).length) kutu.append(el('p', 'soluk', du.notlar.join(' · ')))
+  if (k.calisiyor && du && du.envanter) {
+    const es = Object.entries(du.envanter).sort((a, b) => b[1] - a[1]).map(([n, c]) => `${n.replace(/_/g, ' ')} ×${c}`)
+    kutu.append(el('p', 'soluk', `❤ ${du.can}/20 · 🍗 ${du.aclik}/20 · ${du.boyut || ''}${du.kafa ? ' · kafada ' + du.kafa : ''}`))
+    kutu.append(el('p', 'soluk', 'Envanter: ' + es.join(', ')))
+  }
   const satirlar = k.sonlar.map((r) => {
     const tr = el('tr')
     const td = (x, c) => { const t = el('td', c || null); typeof x === 'string' ? (t.textContent = x) : t.append(x); return t }
