@@ -263,6 +263,7 @@ async function huntEndermen(bot, need, say, opts = {}) {
   let lastSuccess = Date.now();
   let lastStock = 0;
   let lastHp = bot.health;
+  const tries = new Map(); // id -> kaç kez kızdırıldı
   // Aynı anda en çok 3 kızgın enderman: hepsi kapsülün dibine gelip sırayla kesilir.
   const angryCount = () => [...lured.entries()].filter(([id, t]) => bot.entities[id] && Date.now() - t < 30000).length;
   const onGone = (e) => {
@@ -328,7 +329,9 @@ async function huntEndermen(bot, need, say, opts = {}) {
         } else if (near.length && bot.health >= 12 && Date.now() - lastLure > 2000 && angryCount() < 3 && Date.now() - lastSuccess <= 30000) {
           // Kızdıracak enderman: bize yakın ve aşağı yukarı aynı yükseklikte olan.
           // Kızdıracak enderman: kapsülün bir duvar bloğunu açınca görülebilen.
-          const target = near.find((e) => e.position.distanceTo(bot.entity.position) >= 3 && !(Date.now() - (lured.get(e.id) || 0) < 20000) && (HUT ? canSee(bot, e) : windowFor(bot, e)));
+          // İki kez kızdırılıp gelmeyen (yolu yok) endermanı bırak.
+          const target = near.find((e) => e.position.distanceTo(bot.entity.position) >= 3 && (tries.get(e.id) || 0) < 2 && !(Date.now() - (lured.get(e.id) || 0) < 20000) && (HUT ? canSee(bot, e) : windowFor(bot, e)));
+          if (target) tries.set(target.id, (tries.get(target.id) || 0) + 1);
           if (target && !(await shelter(bot))) {
             // Kapsül kapanmıyor: bir yana kay, sonra tekrar dene.
             const c = H.cellOf(bot);
@@ -347,15 +350,20 @@ async function huntEndermen(bot, need, say, opts = {}) {
           lastLure = Date.now();
           // Endermanların toplandığı yere (görünenlerin ortası) yürü; yoksa 24 blok rastgele.
           const c = H.cellOf(bot);
-          const pool = endermen(bot, 96).filter((e) => e.position.distanceTo(bot.entity.position) > 10);
+          // Görülebilecek bir enderman bulana kadar en yakın (denenmemiş) endermana doğru yürü.
+          const pool = endermen(bot, 96).filter((e) => e.position.distanceTo(bot.entity.position) > 8 && (tries.get(e.id) || 0) < 2);
           let gx = c.x + [24, 0, -24, 0][Math.floor(Math.random() * 4)];
           let gz = c.z + [0, 24, 0, -24][Math.floor(Math.random() * 4)];
-          if (pool.length) {
-            gx = Math.round(pool.reduce((a, e) => a + e.position.x, 0) / pool.length);
-            gz = Math.round(pool.reduce((a, e) => a + e.position.z, 0) / pool.length);
-          }
+          if (pool.length) { gx = Math.round(pool[0].position.x); gz = Math.round(pool[0].position.z); }
           A.dbg("enderman avı: yer değiştiriyorum", gx, gz, `(${pool.length} enderman)`);
-          await A.goto(bot, new GoalNearXZ(gx, gz, 6), 30000);
+          bot.pathfinder.setGoal(new GoalNearXZ(gx, gz, 10));
+          const tw = Date.now();
+          while (Date.now() - tw < 25000 && bot.pathfinder.isMoving()) {
+            if (endermen(bot, 40).some((e) => (tries.get(e.id) || 0) < 2 && e.position.distanceTo(bot.entity.position) > 6 && canSee(bot, e))) break;
+            await A.sleep(200);
+          }
+          bot.pathfinder.setGoal(null);
+          bot.clearControlStates();
           await shelter(bot);
         }
       }
