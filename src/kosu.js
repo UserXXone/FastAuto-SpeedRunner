@@ -299,7 +299,7 @@ async function netherKosu(args) {
 
     if (endTest && rcon) {
       console.log("TEST: End'e ışınlanıyor, yataklar veriliyor (gerçek koşu değil).");
-      for (const it of ["stone_pickaxe", "stone_pickaxe", "stone_sword", "cobblestone 192", "cooked_beef 12", "white_bed 12", "bow", "arrow 64"])
+      for (const it of ["stone_pickaxe", "stone_pickaxe", "stone_sword", "cobblestone 192", "cooked_beef 16", "white_bed 16", "bow", "arrow 64"])
         await rcon.komut(`give ${username} ${it}`);
       // Portaldan girişteki obsidyen platform (ışınlanınca oluşmuyor).
       await rcon.komut("execute in minecraft:the_end run forceload add 96 -4 104 4");
@@ -308,6 +308,9 @@ async function netherKosu(args) {
       await rcon.komut("execute in minecraft:the_end run fill 98 49 -2 102 51 2 air");
       await rcon.komut(`execute in minecraft:the_end run tp ${username} 100.5 49 0.5`);
       await rcon.komut(`item replace entity ${username} armor.head with carved_pumpkin`);
+      // Gerçek koşuda demir zırh Overworld'de yapılacak (sonraki iş); testte veriliyor.
+      if (args.zirh) for (const [slot, it] of [["chest", "iron_chestplate"], ["legs", "iron_leggings"], ["feet", "iron_boots"]])
+        await rcon.komut(`item replace entity ${username} armor.${slot} with ${it}`);
       // Kristaller dururken ejderha nadiren iniyor (15 dk'da hiç inmedi). Yatak
       // patlatmayı ölçmek için testte kristaller kaldırılabilir: --kristal-yok
       if (args["kristal-yok"]) {

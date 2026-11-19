@@ -98,6 +98,7 @@ async function reachCenter(bot, dist = 7, say = () => {}) {
 
 // Duruş yerinin fıskiye yönündeki iki hücre: duvar (1 blok önde, 2 yüksek) ve yatak yeri (2 blok önde).
 const BED_RAISE = Number(process.env.BED_RAISE || 2);
+const OPEN = process.env.EJDERHA_MOD !== "siginak"; // açık: yüzeyde dur (iniş için görünmek şart: görünmezken hiç oturmadı)
 const POPUP = process.env.EJDERHA_CIK !== "0"; // inişte yüzeye çık: görmediği oyuncu için ~hiç oturmuyor (ölçüldü)
 function layout(stand) {
   const d = Math.hypot(stand.x, stand.z) || 1;
@@ -509,6 +510,8 @@ async function killDragon(bot, say = () => {}, opts = {}) {
     };
     await reseal();
     await clearBedSpot(bot, L);
+    let downAt = 0;
+    if (OPEN) await popUp();
     // Kristalleri döngü içinde, ejderha havadayken teker teker vururuz: kristale
     // kilitlenip inen ejderhayı kaçırıyorduk.
     const crystalTries = new Map();
@@ -529,7 +532,7 @@ async function killDragon(bot, say = () => {}, opts = {}) {
       // kaçmaya kalkınca dışarı çıkıp öldük.
       const hurtRecently = Date.now() - (bot._dragonHurtAt || 0) < 1500;
       const cloud = hurtRecently && Object.values(bot.entities).find((e) => e.name === "area_effect_cloud" && e.position.distanceTo(bot.entity.position) < 8);
-      if (up && (hurtRecently || cloud)) { await dropDown("vuruldum"); continue; }
+      if (up && (hurtRecently || cloud)) { await dropDown("vuruldum"); downAt = Date.now(); continue; }
       if (cloud) {
         // Bulutun merkezi tam üstümüzdeyse "uzağı" yok: fıskiyeden dışarı doğru kaç.
         let away = bot.entity.position.minus(cloud.position);
@@ -565,10 +568,15 @@ async function killDragon(bot, say = () => {}, opts = {}) {
       // Yüzeye sadece ejderha OTURUNCA çık: yaklaşırken çıkınca açık şafttan bizi görüp ateş
       // topu attı. Otururken ateş topu atmıyor; görmezse 5 sn sonra kalkıyor, o yüzden hızlı.
       const sitting = d && perched(bot, top);
-      if (POPUP && !up && sitting && Date.now() - upAt > 3000) { await popUp(); continue; }
+      if (!OPEN && POPUP && !up && sitting && Date.now() - upAt > 3000) { await popUp(); continue; }
       // Yatak hazırda dursun: ejderha oturunca sadece tıklarız (görmezse 5 sn oturuyor).
       if (!up && !bot.blockAt(L.bedFoot)?.name?.endsWith("_bed") && beds(bot) && (!d || !perched(bot, top))) await placeBed(bot, L);
-      if (up && !landing && Date.now() - upAt > 6000) { await dropDown("ejderha kalktı"); continue; }
+      if (!OPEN && up && !landing && Date.now() - upAt > 6000) { await dropDown("ejderha kalktı"); continue; }
+      // Açık modda vurulup indiysek, bulut dağılınca tekrar çık.
+      if (OPEN && !up && Date.now() - downAt > 5000) {
+        const cl = Object.values(bot.entities).some((e) => e.name === "area_effect_cloud" && e.position.distanceTo(top2) < 7);
+        if (!cl) { await popUp(); continue; }
+      }
       if (sitting && (up || !POPUP)) {
         // İniş ~50 sn: art arda patlat (duvarı sadece yıkıldıysa onar). Yavaş kalınca
         // (tur başına 5 sn) ejderha kafasıyla bizi öldürdü.
