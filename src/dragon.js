@@ -159,9 +159,10 @@ async function bedBomb(bot, L) {
 
 // Buluttan uzağa düz koş (zıplayarak, sprint). Önümüz kapalıysa yan dön.
 async function fleeFrom(bot, cloud) {
-  const cloudsNear = () => Object.values(bot.entities).filter((e) => e.name === "area_effect_cloud" && e.position.distanceTo(bot.entity.position) < 5);
+  // Nefes bulutu büyüyor (yarıçap ~3'ten 6+'ya): 9 blok uzaklaşana kadar koş.
+  const cloudsNear = () => Object.values(bot.entities).filter((e) => e.name === "area_effect_cloud" && e.position.distanceTo(bot.entity.position) < 9);
   const base = Math.atan2(bot.entity.position.x - cloud.position.x, bot.entity.position.z - cloud.position.z);
-  const tries = [0, Math.PI / 2, -Math.PI / 2, Math.PI / 4, -Math.PI / 4];
+  const tries = [0, 0, Math.PI / 2, -Math.PI / 2, Math.PI / 4, -Math.PI / 4, 0];
   for (const off of tries) {
     if (!cloudsNear().length) break;
     const ang = (Math.hypot(bot.entity.position.x - cloud.position.x, bot.entity.position.z - cloud.position.z) < 1
@@ -285,6 +286,9 @@ async function killDragon(bot, say = () => {}, opts = {}) {
   let killed = false;
   let bombs = 0;
   const onDead = (e) => { if (e.name === "ender_dragon") killed = true; };
+  const onBar = (b) => { if (b && typeof b.health === "number") bot._dragonHp = b.health; };
+  bot.on("bossBarUpdated", onBar);
+  bot.on("bossBarCreated", onBar);
   bot.on("entityDead", onDead);
   try {
     const stand = await reachCenter(bot, opts.dist || 9, say);
@@ -304,10 +308,10 @@ async function killDragon(bot, say = () => {}, opts = {}) {
       const d = dragon(bot);
       if (Date.now() - lastLog > 5000) {
         lastLog = Date.now();
-        A.dbg(`ejderha: ${d ? `${d.position.x.toFixed(0)},${d.position.y.toFixed(0)},${d.position.z.toFixed(0)}` : "yok"} can ${bot.health.toFixed(0)} yatak ${beds(bot)} patlama ${bombs}`);
+        A.dbg(`ejderha can ${bot._dragonHp != null ? Math.round(bot._dragonHp * 200) : "?"}/200 |`, `${d ? `${d.position.x.toFixed(0)},${d.position.y.toFixed(0)},${d.position.z.toFixed(0)}` : "yok"} can ${bot.health.toFixed(0)} yatak ${beds(bot)} patlama ${bombs}`);
       }
       // Ejderha ateş topunun mor bulutu (nefes) üstümüzdeyse kaç: içinde durunca öldük.
-      const cloud = Object.values(bot.entities).find((e) => e.name === "area_effect_cloud" && e.position.distanceTo(bot.entity.position) < 4.5);
+      const cloud = Object.values(bot.entities).find((e) => e.name === "area_effect_cloud" && e.position.distanceTo(bot.entity.position) < 6);
       if (cloud) {
         // Bulutun merkezi tam üstümüzdeyse "uzağı" yok: fıskiyeden dışarı doğru kaç.
         let away = bot.entity.position.minus(cloud.position);
@@ -318,7 +322,7 @@ async function killDragon(bot, say = () => {}, opts = {}) {
         A.dbg("nefes bulutu: kaçıyorum", tx, tz);
         // Yol bulucu bulutun içinde saniyelerce düşünüyordu (öldük): düz koş, zıplayarak.
         await fleeFrom(bot, cloud);
-        const cloudNearStand = () => Object.values(bot.entities).some((e) => e.name === "area_effect_cloud" && e.position.distanceTo(stand) < 5);
+        const cloudNearStand = () => Object.values(bot.entities).some((e) => e.name === "area_effect_cloud" && e.position.distanceTo(stand) < 7);
         // Bulut dağılana kadar boş bekleme: bu sırada kristale/ejderhaya ok at.
         const tw = Date.now();
         while (Date.now() - tw < 15000 && cloudNearStand() && !killed) {
@@ -351,7 +355,8 @@ async function killDragon(bot, say = () => {}, opts = {}) {
         if (!under.every(solid) || fiery || (spot && spot.boundingBox === "block")) await clearBedSpot(bot, L);
         if (await bedBomb(bot, L)) {
           bombs++;
-          say(`  yatak patladı (${bombs}), ejderha ${d.position.y.toFixed(0)}`);
+          await A.sleep(150);
+          say(`  yatak patladı (${bombs}), ejderha ${d.position.y.toFixed(0)}, can ${bot._dragonHp != null ? Math.round(bot._dragonHp * 200) : "?"}/200`);
         }
         await A.sleep(120);
       } else {
