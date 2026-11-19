@@ -750,6 +750,13 @@ async function killDragonBowl(bot, say = () => {}, opts = {}) {
         }
       } finally { C.stopMoving(bot); }
     };
+    // Tünelin ön kabuğu çanağın ağzını kapatmış olabilir: aç (bedrock'a dokunmadan).
+    for (const c of [new Vec3(cur[0] * 2, floorY + 1, cur[1] * 2), new Vec3(cur[0] * 2, floorY + 2, cur[1] * 2), new Vec3(cur[0] * 2, floorY, cur[1] * 2)]) {
+      const b = bot.blockAt(c);
+      if (b && b.boundingBox === "block" && b.name !== "bedrock") {
+        try { const { item } = A.fastestTool(bot, b); if (item) await bot.equip(item, "hand"); await bot.dig(b, true); } catch (err) { A.dbg("çanak ağzı kazılamadı:", c.toString(), err.message); }
+      }
+    }
     await walkTo(cur[0] * 2, cur[1] * 2);
     for (let k = 0; k < 20 && !bot.entity.onGround; k++) await A.sleep(50);
     A.dbg("çanakta:", H.cellOf(bot).toString());
