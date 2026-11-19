@@ -63,7 +63,7 @@ async function reachCenter(bot, dist = 7, say = () => {}) {
   say(`Adanın ortasına gidiyorum (${sx}, ${sz})`);
   // Baştan sona kapalı tünel (çoğu yer altında): açıkta yürürken ejderha görüp ateş
   // topu atıyor, defalarca yolda öldük. Tünelin içi görünmez.
-  let r = await H.longHaul(bot, { x: sx, z: sz }, { range: 2, minY: 50, maxY: 72, maxMs: 600000, harvest: 64 });
+  let r = await H.longHaul(bot, { x: sx, z: sz }, { range: 2, minY: 50, maxY: 72, maxMs: 900000, harvest: 1 });
   A.dbg("End tüneli:", r, H.cellOf(bot).toString());
   const gy = groundAt(bot, sx, sz);
   if (gy == null) return { surface: H.cellOf(bot) };
