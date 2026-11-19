@@ -150,6 +150,85 @@ async function bedBomb(bot, L) {
   return ok;
 }
 
+// --- Ok ---------------------------------------------------------------------
+// Tam gerilmiş ok: hız 3 blok/tik, yerçekimi 0,05/tik, sürtünme 0,99/tik.
+// Hedefin yatay uzaklığında yüksekliği tutturan eğimi deneme ile bul.
+function arrowPitch(dx, dy) {
+  let best = null;
+  for (let deg = -30; deg <= 80; deg += 0.25) {
+    const a = (deg * Math.PI) / 180;
+    let vx = 3 * Math.cos(a), vy = 3 * Math.sin(a), x = 0, y = 0, t = 0;
+    while (x < dx && t < 200) { x += vx; y += vy; vx *= 0.99; vy = vy * 0.99 - 0.05; t++; }
+    if (x < dx) continue;
+    const err = Math.abs(y - dy);
+    if (!best || err < best.err) best = { a, err, t };
+  }
+  return best; // { a: radyan, t: uçuş tiki }
+}
+
+const bow = (bot) => bot.inventory.items().find((i) => i.name === "bow");
+const arrows = (bot) => A.count(bot, (i) => i.name === "arrow");
+
+// Bir hedefe ok at (hareketliyse önüne). Dönen: atıldı mı.
+async function shoot(bot, target, height = 0.5) {
+  const b = bow(bot);
+  if (!b || !arrows(bot)) return false;
+  let ok = false;
+  await A.withHand(bot, async () => {
+    await bot.equip(b, "hand");
+    bot.activateItem(); // germeye başla
+    await A.sleep(1100);
+    const eye = bot.entity.position.offset(0, 1.62, 0);
+    let to = target.position.offset(0, height, 0);
+    let sol = null;
+    for (let k = 0; k < 3; k++) {
+      const dx = Math.hypot(to.x - eye.x, to.z - eye.z);
+      sol = arrowPitch(dx, to.y - eye.y);
+      if (!sol) break;
+      const v = target.velocity || { x: 0, y: 0, z: 0 };
+      to = target.position.offset(v.x * sol.t, height + v.y * sol.t, v.z * sol.t);
+    }
+    if (!sol) { bot.deactivateItem(); return; }
+    const yaw = Math.atan2(-(to.x - eye.x), -(to.z - eye.z));
+    await bot.look(yaw, sol.a, true);
+    await A.sleep(60);
+    bot.deactivateItem(); // bırak
+    ok = true;
+  });
+  return ok;
+}
+
+// Kristaller: kulelerin tepesinde. Kafesli olanlara ok geçmez (demir parmaklık); atlarız.
+function crystals(bot) {
+  return Object.values(bot.entities).filter((e) => e.name === "end_crystal");
+}
+function caged(bot, c) {
+  const p = c.position.floored();
+  for (const [dx, dy, dz] of [[1, 0, 0], [-1, 0, 0], [0, 0, 1], [0, 0, -1], [0, 2, 0]]) {
+    const b = bot.blockAt(p.offset(dx, dy, dz));
+    if (b && b.name === "iron_bars") return true;
+  }
+  return false;
+}
+
+async function shootCrystals(bot, say, maxMs = 180000) {
+  const t0 = Date.now();
+  const tried = new Map();
+  let broken = 0;
+  while (Date.now() - t0 < maxMs && arrows(bot)) {
+    const me = bot.entity.position;
+    const list = crystals(bot).filter((c) => !caged(bot, c) && (tried.get(c.id) || 0) < 6)
+      .sort((a, b) => a.position.distanceTo(me) - b.position.distanceTo(me));
+    if (!list.length) break;
+    const c = list[0];
+    tried.set(c.id, (tried.get(c.id) || 0) + 1);
+    await shoot(bot, c, 1.0);
+    await A.sleep(1500);
+    if (!bot.entities[c.id]) { broken++; say(`  kristal patladı (${broken})`); }
+  }
+  return { broken, left: crystals(bot).length };
+}
+
 /**
  * Ejderhayı öldür. Dönen: { killed, bombs, ms }
  */
@@ -167,6 +246,11 @@ async function killDragon(bot, say = () => {}, opts = {}) {
     say(`Duruş ${stand}, fıskiye tepesi y=${top}, yatak ${L.bedFoot}`);
     await H.placeMany(bot, L.wall, 3);
     await clearBedSpot(bot, L);
+    // Önce kristaller (iyileştiriyorlar ve dururken ejderha nadiren iniyor).
+    if (bow(bot) && arrows(bot)) {
+      const k = await shootCrystals(bot, say);
+      say(`Kristaller: ${k.broken} patladı, ${k.left} kaldı`);
+    }
     let lastLog = 0;
     while (!killed) {
       if (Date.now() - t0 > maxMs) throw new Error(`Ejderha çok uzun sürdü (${bombs} yatak)`);
@@ -193,7 +277,9 @@ async function killDragon(bot, say = () => {}, opts = {}) {
         await A.sleep(120);
       } else {
         if (bot.food < 18 && C.bestFood(bot)) await C.eat(bot);
-        await A.sleep(200);
+        // Ejderha havadayken, menzildeyse ok at (en azından can götürür).
+        if (d && bow(bot) && arrows(bot) > 8 && d.position.distanceTo(bot.entity.position) < 60) await shoot(bot, d, 1.5);
+        else await A.sleep(200);
       }
     }
   } finally {
