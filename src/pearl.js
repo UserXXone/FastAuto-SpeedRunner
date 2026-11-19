@@ -12,7 +12,7 @@
 // Sunucu vuruşta görüş hattına bakmadığı için çalışır; normal bir oyuncu yapamaz.
 
 const { Vec3 } = require("vec3");
-const { goals: { GoalNear, GoalNearXZ } } = require("mineflayer-pathfinder");
+const { goals: { GoalNear, GoalNearXZ, GoalFollow } } = require("mineflayer-pathfinder");
 const A = require("./actions");
 const C = require("./combat");
 const H = require("./highway");
@@ -182,7 +182,11 @@ async function buildPillar(bot) {
   }
   const ok = onPillar(bot);
   bot._pillarTop = ok ? H.cellOf(bot) : null;
-  if (!ok) A.dbg("direk olmadı:", H.cellOf(bot).toString());
+  if (!ok) {
+    const c = H.cellOf(bot);
+    A.dbg("direk olmadı:", c.toString(), "alt:", [1, 2, 3].map((i) => (bot.blockAt(c.offset(0, -i, 0)) || {}).name).join(","),
+      "yan:", [[1, 0], [-1, 0], [0, 1], [0, -1]].map(([dx, dz]) => (bot.blockAt(c.offset(dx, -1, dz)) || {}).name).join(","));
+  }
   return ok;
 }
 // Direkten in (altımızı kazarak): yere düşen pearl'leri almak için.
@@ -430,10 +434,13 @@ async function huntEndermen(bot, need, say, opts = {}) {
           const gz = best ? best.z : c.z + [0, 24, 0, -24][Math.floor(Math.random() * 4)];
           if (MODE === "direk") await leavePillar(bot);
           A.dbg("enderman avı: yer değiştiriyorum", gx, gz, `(${pool.length} enderman, oradan görünen ~${bestN.toFixed(1)})`);
-          bot.pathfinder.setGoal(best ? new GoalNear(best.x, best.y + 1, best.z, 1) : new GoalNearXZ(gx, gz, 3));
+          // Direk modunda: en yakın endermana, onu görebildiğimiz ~12 bloğa kadar sokul.
+          const prey = MODE === "direk" ? pool.sort((a, b) => a.position.distanceTo(bot.entity.position) - b.position.distanceTo(bot.entity.position))[0] : null;
+          if (prey) A.dbg("enderman avı: sokuluyorum", prey.position.distanceTo(bot.entity.position).toFixed(1));
+          bot.pathfinder.setGoal(prey ? new GoalFollow(prey, 8) : best ? new GoalNear(best.x, best.y + 1, best.z, 1) : new GoalNearXZ(gx, gz, 3), Boolean(prey));
           const tw = Date.now();
           while (Date.now() - tw < 25000 && bot.pathfinder.isMoving()) {
-            if (endermen(bot, 40).some((e) => (tries.get(e.id) || 0) < 2 && e.position.distanceTo(bot.entity.position) > 6 && canSee(bot, e))) break;
+            if (endermen(bot, 40).some((e) => (tries.get(e.id) || 0) < 2 && e.position.distanceTo(bot.entity.position) > 4 && e.position.distanceTo(bot.entity.position) < 16 && canSee(bot, e))) break;
             await A.sleep(200);
           }
           bot.pathfinder.setGoal(null);
