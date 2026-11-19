@@ -87,7 +87,8 @@ async function placeNoRecurse(bot, p) {
 // Enderman 2,9 blok boyunda: çatının altına giremez, en yakın 2 blok öteden
 // vuramaz (yetişme ~1,4). Biz 4,2 menzille vururuz; yanlar açık olduğu için
 // baktığımız enderman bizi görür, kızar ve çatının kenarına gelir.
-const MODE = process.env.PEARL_MODE || "direk";
+// kapsul: ölçüldü, kapalı kapsülde (pencereli bile) enderman vuramıyor; direk engebeli arazide vurulabiliyor.
+const MODE = process.env.PEARL_MODE || "kapsul";
 const HUT = MODE === "hut" || MODE === "direk";
 const HUT_RAISE = Number(process.env.HUT_RAISE || 2);
 async function buildHut(bot) {
@@ -500,7 +501,7 @@ async function huntEndermen(bot, need, say, opts = {}) {
           if (MODE === "direk") await leavePillar(bot);
           A.dbg("enderman avı: yer değiştiriyorum", gx, gz, `(${pool.length} enderman, oradan görünen ~${bestN.toFixed(1)})`);
           // Direk modunda: en yakın endermana, onu görebildiğimiz ~12 bloğa kadar sokul.
-          const prey = MODE === "direk" ? pool.sort((a, b) => a.position.distanceTo(bot.entity.position) - b.position.distanceTo(bot.entity.position))[0] : null;
+          const prey = pool.length ? pool.sort((a, b) => a.position.distanceTo(bot.entity.position) - b.position.distanceTo(bot.entity.position))[0] : null;
           if (prey) A.dbg("enderman avı: sokuluyorum", prey.position.distanceTo(bot.entity.position).toFixed(1));
           bot.pathfinder.setGoal(prey ? new GoalFollow(prey, 8) : best ? new GoalNear(best.x, best.y + 1, best.z, 1) : new GoalNearXZ(gx, gz, 3), Boolean(prey));
           const tw = Date.now();
