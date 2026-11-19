@@ -21,6 +21,7 @@ const isFiller = (i) => FILLERS.includes(i.name);
 const FILLER_ORDER = ["netherrack", "dirt", "soul_soil", "soul_sand", "cobblestone", "cobbled_deepslate", "blackstone", "basalt", "nether_bricks", "end_stone"];
 function pickFiller(bot) {
   const items = bot.inventory.items().filter(isFiller);
+  if (bot._fillerPref) { const p = items.find((i) => i.name === bot._fillerPref); if (p) return p; }
   items.sort((a, b) => FILLER_ORDER.indexOf(a.name) - FILLER_ORDER.indexOf(b.name));
   return items[0];
 }
@@ -270,9 +271,12 @@ async function step(bot, from, to, enclosed = false) {
 // Olduğun yerde bir blok yüksel (zıpla, altına blok koy).
 async function pillarUp(bot) {
   const base = cellOf(bot);
-  if (!(await clearCell(bot, base.offset(0, 2, 0), [base, base.offset(0, 1, 0), base.offset(0, 2, 0)]))) return false;
+  if (!(await clearCell(bot, base.offset(0, 2, 0), [base, base.offset(0, 1, 0), base.offset(0, 2, 0)]))) {
+    A.dbg("yükselme: üst açılamadı", base.offset(0, 2, 0).toString(), (bot.blockAt(base.offset(0, 2, 0)) || {}).name);
+    return false;
+  }
   const ref = bot.blockAt(base.offset(0, -1, 0));
-  if (!isSolid(ref)) return false;
+  if (!isSolid(ref)) { A.dbg("yükselme: altımız boş", base.toString(), ref && ref.name); return false; }
   for (let attempt = 0; attempt < 4 && cellOf(bot).y === base.y; attempt++) {
     // Bloğun ortasında dur: kenardaysak koyduğumuz blok bize çarpar.
     const c = base.offset(0.5, 0, 0.5);
@@ -307,7 +311,9 @@ async function pillarUp(bot) {
     });
     await A.sleep(300);
   }
-  return cellOf(bot).y === base.y + 1;
+  const ok = cellOf(bot).y === base.y + 1;
+  if (!ok) A.dbg("yükselme olmadı:", base.toString(), "şimdi", bot.entity.position.y.toFixed(2), "eldeki", bot.heldItem && bot.heldItem.name, "dolgu", A.count(bot, isFiller));
+  return ok;
 }
 
 /**

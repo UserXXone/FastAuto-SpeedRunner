@@ -98,8 +98,8 @@ async function reachCenter(bot, dist = 7, say = () => {}) {
 
 // Duruş yerinin fıskiye yönündeki iki hücre: duvar (1 blok önde, 2 yüksek) ve yatak yeri (2 blok önde).
 const BED_RAISE = Number(process.env.BED_RAISE || 2);
-const OPEN = process.env.EJDERHA_MOD !== "siginak";
-const ARROWS = process.env.EJDERHA_OK === "1"; // otururken kafaya ok: vanilla oturan ejderha oka bağışık (deneysel, kapalı) // açık: yüzeyde dur (iniş için görünmek şart: görünmezken hiç oturmadı)
+const OPEN = process.env.EJDERHA_MOD !== "siginak"; // açık: yüzeyde dur (iniş için görünmek şart: görünmezken hiç oturmadı)
+const ARROWS = process.env.EJDERHA_OK === "1"; // otururken kafaya ok: vanilla oturan ejderha oka bağışık (deneysel, kapalı)
 const POPUP = process.env.EJDERHA_CIK !== "0"; // inişte yüzeye çık: görmediği oyuncu için ~hiç oturmuyor (ölçüldü)
 function layout(stand) {
   const d = Math.hypot(stand.x, stand.z) || 1;
@@ -450,9 +450,12 @@ async function killDragon(bot, say = () => {}, opts = {}) {
     const windows = [];
     let up = false; // sığınaktan yüzeye çıktık mı (ejderha bizi görsün diye)
     let upAt = 0;
+    // Kabuk End taşından: ejderha uçarken netherrack/kırıktaşı kırıp içeri dalıyor, End
+    // taşını kıramıyor.
+    const shellPlace = async (cells) => { bot._fillerPref = "end_stone"; try { await H.placeMany(bot, cells, 4); } finally { bot._fillerPref = null; } };
     const reseal = async () => {
       if (up) return;
-      if (shell.some((c) => (bot.blockAt(c) || {}).boundingBox !== "block")) await H.placeMany(bot, shell, 4);
+      if (shell.some((c) => (bot.blockAt(c) || {}).boundingBox !== "block")) await shellPlace(shell);
     };
     const digCell = async (c) => {
       const b = bot.blockAt(c);
@@ -507,7 +510,7 @@ async function killDragon(bot, say = () => {}, opts = {}) {
       base = H.cellOf(bot);
       shell = shellOf(base);
       bot._noFill = [base, base.offset(0, 1, 0)];
-      await H.placeMany(bot, shell, 4);
+      await shellPlace(shell);
     };
     await reseal();
     await clearBedSpot(bot, L);
