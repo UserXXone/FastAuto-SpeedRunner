@@ -91,8 +91,8 @@ async function harvestWalls(bot, from, at) {
 // Birden çok hücreyi aynı anda doldur: blok koyma paketlerini beklemeden art arda
 // gönder (her biri tek tek ~0,3 sn sunucu cevabı bekliyordu; tüp adımı ~2 sn
 // sürüyordu). Tutunacak komşusu olmayanlar sonraki turda; kalanlar tek tek.
-async function placeMany(bot, cells) {
-  for (let pass = 0; pass < 2; pass++) {
+async function placeMany(bot, cells, passes = 2) {
+  for (let pass = 0; pass < passes; pass++) {
     const todo = cells.filter((c) => {
       const b = bot.blockAt(c);
       return b && !isSolid(b) && (isOpen(b) || isLiquid(b)) && b.name !== "nether_portal";
@@ -542,4 +542,4 @@ async function longHaul(bot, dest, opts = {}) {
 
 const dbgH = (...a) => A.dbg(...a);
 
-module.exports = { longHaul, highway, mineTunnel, planLevel, step, walkInto, MINEABLE, placeFiller, clearCell, pillarUp, cellOf, FILLERS, isFiller };
+module.exports = { placeMany, longHaul, highway, mineTunnel, planLevel, step, walkInto, MINEABLE, placeFiller, clearCell, pillarUp, cellOf, FILLERS, isFiller };

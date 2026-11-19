@@ -83,6 +83,77 @@ async function placeNoRecurse(bot, p) {
   return H.placeFiller(bot, p, 99);
 }
 
+// Çatı (2 blok yüksek barınak): botun 3x3 çevresinin üstü kapalı, yanlar açık.
+// Enderman 2,9 blok boyunda: çatının altına giremez, en yakın 2 blok öteden
+// vuramaz (yetişme ~1,4). Biz 4,2 menzille vururuz; yanlar açık olduğu için
+// baktığımız enderman bizi görür, kızar ve çatının kenarına gelir.
+const HUT = (process.env.PEARL_MODE || "hut") === "hut";
+async function buildHut(bot) {
+  for (let i = 0; i < 20 && !bot.entity.onGround; i++) await A.sleep(50);
+  const c = H.cellOf(bot);
+  const mid = c.offset(0.5, 0, 0.5);
+  for (let i = 0; i < 12 && Math.hypot(bot.entity.position.x - mid.x, bot.entity.position.z - mid.z) > 0.12; i++) {
+    await bot.lookAt(new Vec3(mid.x, bot.entity.position.y + 1.62, mid.z), true);
+    bot.setControlState("forward", true);
+    await A.sleep(50);
+  }
+  bot.setControlState("forward", false);
+  const ring = [];
+  for (let dx = -1; dx <= 1; dx++) for (let dz = -1; dz <= 1; dz++) ring.push([dx, dz]);
+  // Zemin: 3x3 dolu (altı boş kenar hücresi 3 blok yüksek olur, enderman sığar).
+  const floor = ring.map(([dx, dz]) => c.offset(dx, -1, dz));
+  const solidAt = (p) => (bot.blockAt(p) || {}).boundingBox === "block";
+  if (floor.every(solidAt) && ring.every(([dx, dz]) => solidAt(c.offset(dx, 2, dz)))) return true;
+  // Çatıya tutunmak için geçici bir direk: yan hücreye iki blok.
+  const post = [c.offset(1, 0, 0), c.offset(1, 1, 0)];
+  const roof = ring.map(([dx, dz]) => c.offset(dx, 2, dz));
+  roof.sort((a, b) => (a.equals(c.offset(1, 2, 0)) ? -1 : 0) - (b.equals(c.offset(1, 2, 0)) ? -1 : 0));
+  const postWasAir = post.map((p) => (bot.blockAt(p) || {}).boundingBox !== "block");
+  await H.placeMany(bot, [...floor, ...post, ...roof], 4);
+  // Direği kaldır (yan açık kalsın: görüş hattı).
+  for (let i = post.length - 1; i >= 0; i--) {
+    if (!postWasAir[i]) continue;
+    const b = bot.blockAt(post[i]);
+    if (b && b.boundingBox === "block") {
+      try {
+        await A.withHand(bot, async () => {
+          const { item } = A.fastestTool(bot, b);
+          if (item && (!bot.heldItem || bot.heldItem.type !== item.type)) await bot.equip(item, "hand");
+          await bot.dig(b, true);
+        });
+      } catch (err) { /* kalsın */ }
+    }
+  }
+  const open = roof.filter((p) => (bot.blockAt(p) || {}).boundingBox !== "block").length;
+  if (open) A.dbg("çatı tamamlanmadı:", open, "açık", c.toString());
+  return open === 0;
+}
+
+// Çatı modunda kızdırma: görüş hattı açıksa sadece bak.
+async function lookLure(bot, target) {
+  const eye = bot.entity.position.offset(0, bot.entity.eyeHeight || 1.62, 0);
+  const to = target.position.offset(0, ENDERMAN_EYE, 0);
+  const dir = to.minus(eye).normalize();
+  const hit = bot.world.raycast(eye, dir, eye.distanceTo(to), (b) => b && b.boundingBox === "block");
+  if (hit) return false;
+  const t0 = Date.now();
+  while (Date.now() - t0 < 1200 && bot.entities[target.id]) {
+    await bot.lookAt(target.position.offset(0, ENDERMAN_EYE, 0), true);
+    await A.sleep(50);
+  }
+  return true;
+}
+
+function canSee(bot, target) {
+  const eye = bot.entity.position.offset(0, bot.entity.eyeHeight || 1.62, 0);
+  const to = target.position.offset(0, ENDERMAN_EYE, 0);
+  if (eye.distanceTo(to) > 60) return false;
+  const dir = to.minus(eye).normalize();
+  return !bot.world.raycast(eye, dir, eye.distanceTo(to), (b) => b && b.boundingBox === "block");
+}
+
+const shelter = (bot) => (HUT ? buildHut(bot) : sealCapsule(bot));
+
 async function sealCapsule(bot) {
   // Bloğun ortasında dur: kenardaysak gövdemiz komşu hücreye taşar, sunucu oraya
   // blok koymayı reddeder ve kapsül açık kalır (enderman vuruyor: can 0,2'ye indi).
@@ -199,7 +270,7 @@ async function huntEndermen(bot, need, say, opts = {}) {
   };
   bot.on("entityGone", onGone);
   try {
-    await sealCapsule(bot);
+    await shelter(bot);
     while (pearls(bot) < need) {
       if (Date.now() - t0 > maxMs) throw new Error(`Enderman avı çok uzun sürdü (${pearls(bot)}/${need} pearl)`);
       if (bot.inLavaEscape) {
@@ -212,7 +283,7 @@ async function huntEndermen(bot, need, say, opts = {}) {
         const before = A.count(bot, H.isFiller);
         await H.mineTunnel(bot, 64, 40);
         A.dbg(`enderman avı: blok azaldı, toplandı ${before} → ${A.count(bot, H.isFiller)}`);
-        await sealCapsule(bot);
+        await shelter(bot);
         continue;
       }
       if (pearls(bot) !== lastCount) {
@@ -253,18 +324,18 @@ async function huntEndermen(bot, need, say, opts = {}) {
           // Warped forest'ta düşman yok (enderman bakmazsan dokunmaz): açıktan yürü, blok harcama.
           const r = await A.goto(bot, new GoalNear(cell.x, cell.y, cell.z, 0.5), 15000);
           A.dbg("pearl'e yürüündü:", r);
-          await sealCapsule(bot);
+          await shelter(bot);
         } else if (near.length && bot.health >= 12 && Date.now() - lastLure > 2000 && angryCount() < 3 && Date.now() - lastSuccess <= 30000) {
           // Kızdıracak enderman: bize yakın ve aşağı yukarı aynı yükseklikte olan.
           // Kızdıracak enderman: kapsülün bir duvar bloğunu açınca görülebilen.
-          const target = near.find((e) => e.position.distanceTo(bot.entity.position) >= 3 && !(Date.now() - (lured.get(e.id) || 0) < 20000) && windowFor(bot, e));
-          if (target && !(await sealCapsule(bot))) {
+          const target = near.find((e) => e.position.distanceTo(bot.entity.position) >= 3 && !(Date.now() - (lured.get(e.id) || 0) < 20000) && (HUT ? canSee(bot, e) : windowFor(bot, e)));
+          if (target && !(await shelter(bot))) {
             // Kapsül kapanmıyor: bir yana kay, sonra tekrar dene.
             const c = H.cellOf(bot);
             await A.goto(bot, new GoalNearXZ(c.x + (Math.random() < 0.5 ? 2 : -2), c.z + (Math.random() < 0.5 ? 2 : -2), 0), 8000);
-            await sealCapsule(bot);
+            await shelter(bot);
             lastLure = Date.now() - 4000;
-          } else if (target && (await lure(bot, target))) {
+          } else if (target && (await (HUT ? lookLure(bot, target) : lure(bot, target)))) {
             lured.set(target.id, Date.now());
             lastSuccess = Date.now();
             A.dbg("enderman kızdırıldı:", target.position.distanceTo(bot.entity.position).toFixed(1), "blok");
@@ -285,12 +356,12 @@ async function huntEndermen(bot, need, say, opts = {}) {
           }
           A.dbg("enderman avı: yer değiştiriyorum", gx, gz, `(${pool.length} enderman)`);
           await A.goto(bot, new GoalNearXZ(gx, gz, 6), 30000);
-          await sealCapsule(bot);
+          await shelter(bot);
         }
       }
       if (!inReach && (bot.food < 18 || (bot.health < 14 && bot.food < 20)) && C.bestFood(bot)) await C.eat(bot);
       // Vurulduysak kapsülde delik var: kapat.
-      if (bot.health < lastHp) await sealCapsule(bot);
+      if (bot.health < lastHp) await shelter(bot);
       lastHp = bot.health;
       await A.sleep(50);
     }
