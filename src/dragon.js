@@ -243,40 +243,45 @@ const arrows = (bot) => A.count(bot, (i) => i.name === "arrow");
 async function shoot(bot, target, height = 0.5, opts = {}) {
   const b = bow(bot);
   if (!b || !arrows(bot)) return false;
+  const aim = () => {
+    const eye = bot.entity.position.offset(0, 1.62, 0);
+    let to = target.position.offset(0, height, 0);
+    let sol = null;
+    for (let k = 0; k < 3; k++) {
+      sol = arrowPitch(Math.hypot(to.x - eye.x, to.z - eye.z), to.y - eye.y);
+      if (!sol) return null;
+      const v = target.velocity || { x: 0, y: 0, z: 0 };
+      to = target.position.offset(v.x * sol.t, height + v.y * sol.t, v.z * sol.t);
+    }
+    const yaw = Math.atan2(-(to.x - eye.x), -(to.z - eye.z));
+    const dir = new Vec3(-Math.sin(yaw) * Math.cos(sol.a), Math.sin(sol.a), -Math.cos(yaw) * Math.cos(sol.a));
+    return { eye, yaw, pitch: sol.a, dir };
+  };
+  const keep = opts.keep || [];
+  // Okun ilk 4 bloğu açık olmalı (kendi kapsülümüz/tüpümüz): gerekirse pencere aç.
+  for (let i = 0; i < 3; i++) {
+    const s0 = aim();
+    if (!s0) return false;
+    const hit = bot.world.raycast(s0.eye, s0.dir, 4, (bl) => bl && bl.boundingBox === "block");
+    if (!hit) break;
+    if (["bedrock", "obsidian", "end_portal_frame"].includes(hit.name) || keep.some((k) => k.equals(hit.position))) return false;
+    A.dbg("ok yolu kapalı, pencere:", hit.name, hit.position.toString());
+    try {
+      await A.withHand(bot, async () => {
+        const { item } = A.fastestTool(bot, hit);
+        if (item) await bot.equip(item, "hand");
+        await bot.dig(hit, true);
+      });
+    } catch (err) { return false; }
+  }
   let ok = false;
   await A.withHand(bot, async () => {
     await bot.equip(b, "hand");
     bot.activateItem(); // germeye başla
     await A.sleep(1100);
-    const eye = bot.entity.position.offset(0, 1.62, 0);
-    let to = target.position.offset(0, height, 0);
-    let sol = null;
-    for (let k = 0; k < 3; k++) {
-      const dx = Math.hypot(to.x - eye.x, to.z - eye.z);
-      sol = arrowPitch(dx, to.y - eye.y);
-      if (!sol) break;
-      const v = target.velocity || { x: 0, y: 0, z: 0 };
-      to = target.position.offset(v.x * sol.t, height + v.y * sol.t, v.z * sol.t);
-    }
-    if (!sol) { bot.deactivateItem(); return; }
-    const yaw = Math.atan2(-(to.x - eye.x), -(to.z - eye.z));
-    // Okun ilk 4 bloğu açık mı? Kapalı tüpün içindeysek oklar duvara gidiyordu.
-    const dir = new Vec3(-Math.sin(yaw) * Math.cos(sol.a), Math.sin(sol.a), -Math.cos(yaw) * Math.cos(sol.a));
-    const hit = bot.world.raycast(eye, dir, 4, (bl) => bl && bl.boundingBox === "block");
-    if (hit) {
-      bot.deactivateItem();
-      const keep = opts.keep || [];
-      if (!["bedrock", "obsidian", "end_portal_frame"].includes(hit.name) && !keep.some((k) => k.equals(hit.position))) {
-        A.dbg("ok yolu kapalı, açıyorum:", hit.name, hit.position.toString());
-        try {
-          const { item } = A.fastestTool(bot, hit);
-          if (item) await bot.equip(item, "hand");
-          await bot.dig(hit, true);
-        } catch (err) { /* */ }
-      }
-      return;
-    }
-    await bot.look(yaw, sol.a, true);
+    const s1 = aim();
+    if (!s1 || bot.world.raycast(s1.eye, s1.dir, 4, (bl) => bl && bl.boundingBox === "block")) { bot.deactivateItem(); return; }
+    await bot.look(s1.yaw, s1.pitch, true);
     await A.sleep(60);
     bot.deactivateItem(); // bırak
     ok = true;
@@ -342,6 +347,17 @@ async function killDragon(bot, say = () => {}, opts = {}) {
     const perch = H.cellOf(bot);
     A.dbg("ejderha duruşu:", perch.toString(), "yükseklik", perch.y - stand.y);
     await H.placeMany(bot, L.wall, 4);
+    // Kapsül: direğin tepesinde dört yan + tavan. Ejderha görmediği oyuncuya ateş topu
+    // atmıyor ve nefes hücumuna geçmiyor (hedef seçerken görüş hattına bakıyor). Ateş
+    // topları açıktayken bizi defalarca öldürdü. Yatağı kapsülün dışına, yere koyup
+    // tıklarız (sunucu mesafeye bakar, görüşe değil).
+    const shell = [];
+    for (const [sx, sz] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) shell.push(perch.offset(sx, 0, sz), perch.offset(sx, 1, sz));
+    shell.push(perch.offset(0, 2, 0));
+    const reseal = async () => {
+      if (shell.some((c) => (bot.blockAt(c) || {}).boundingBox !== "block")) await H.placeMany(bot, shell, 4);
+    };
+    await reseal();
     await clearBedSpot(bot, L);
     // Kristalleri döngü içinde, ejderha havadayken teker teker vururuz: kristale
     // kilitlenip inen ejderhayı kaçırıyorduk.
@@ -352,6 +368,7 @@ async function killDragon(bot, say = () => {}, opts = {}) {
       if (Date.now() - t0 > maxMs) throw new Error(`Ejderha çok uzun sürdü (${bombs} yatak)`);
       if (!beds(bot)) throw new Error(`Yatak bitti (${bombs} patlatıldı)`);
       const d = dragon(bot);
+      await reseal();
       if (Date.now() - lastLog > 5000) {
         lastLog = Date.now();
         A.dbg(`ejderha can ${bot._dragonHp != null ? Math.round(bot._dragonHp * 200) : "?"}/200 |`, `${d ? `${d.position.x.toFixed(0)},${d.position.y.toFixed(0)},${d.position.z.toFixed(0)}` : "yok"} can ${bot.health.toFixed(0)} yatak ${beds(bot)} patlama ${bombs}`);
@@ -413,15 +430,17 @@ async function killDragon(bot, say = () => {}, opts = {}) {
         // Havada: önce kafessiz kristaller (iyileştiriyorlar, dururken ejderha az iniyor),
         // bitince menzildeyse ejderhaya ok.
         const me = bot.entity.position;
-        const c = bow(bot) && arrows(bot) ? crystals(bot).filter((x) => !caged(bot, x) && (crystalTries.get(x.id) || 0) < 6)
+        // Ok atmak için kapsülde pencere açılıyor: sadece ejderha uzaktayken (bizi
+        // görüp ateş topu atmasın). Ejderhaya ok atmıyoruz (pencere açık kalırdı).
+        const far = !d || d.position.distanceTo(me) > 45;
+        const c = far && bow(bot) && arrows(bot) ? crystals(bot).filter((x) => !caged(bot, x) && (crystalTries.get(x.id) || 0) < 6)
           .sort((a, b) => a.position.distanceTo(me) - b.position.distanceTo(me))[0] : null;
         if (c) {
           crystalTries.set(c.id, (crystalTries.get(c.id) || 0) + 1);
           await shoot(bot, c, 1.0, { keep: L.wall });
-          await A.sleep(600);
+          await A.sleep(400);
           if (!bot.entities[c.id]) { crystalsBroken++; say(`  kristal patladı (${crystalsBroken}), ${crystals(bot).length} kaldı`); }
-        } else if (d && bow(bot) && arrows(bot) > 16 && d.position.distanceTo(me) < 40) await shoot(bot, d, 1.5, { keep: L.wall });
-        else await A.sleep(200);
+        } else await A.sleep(200);
       }
     }
   } finally {
