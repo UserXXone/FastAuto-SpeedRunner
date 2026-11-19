@@ -329,13 +329,16 @@ async function shootCrystals(bot, say, maxMs = 180000) {
   let broken = 0;
   while (Date.now() - t0 < maxMs && arrows(bot)) {
     const me = bot.entity.position;
-    const list = crystals(bot).filter((c) => !caged(bot, c) && (tried.get(c.id) || 0) < 6)
+    // Ejderha yaklaşırsa bırak (görünce ateş topu atıyor).
+    const d = dragon(bot);
+    if (d && d.position.distanceTo(me) < 50) { await A.sleep(500); continue; }
+    const list = crystals(bot).filter((c) => !caged(bot, c) && (tried.get(c.id) || 0) < 4 && c.position.distanceTo(me) < 110)
       .sort((a, b) => a.position.distanceTo(me) - b.position.distanceTo(me));
     if (!list.length) break;
     const c = list[0];
     tried.set(c.id, (tried.get(c.id) || 0) + 1);
     await shoot(bot, c, 1.0);
-    await A.sleep(1500);
+    await A.sleep(1200 + c.position.distanceTo(me) * 15); // uzak hedefte ok geç varıyor
     if (!bot.entities[c.id]) { broken++; say(`  kristal patladı (${broken})`); }
   }
   return { broken, left: crystals(bot).length };
@@ -364,6 +367,12 @@ async function killDragon(bot, say = () => {}, opts = {}) {
   bot.on("bossBarCreated", onBar);
   bot.on("entityDead", onDead);
   try {
+    // Kristaller ejderhayı iyileştiriyor (yataklar 200→140 indirdi, uçarken 200'e döndü):
+    // tünele girmeden giriş platformundan okla vur.
+    if (bow(bot) && arrows(bot)) {
+      const k = await shootCrystals(bot, say, opts.crystalMs || 120000);
+      say(`Kristaller (platformdan): ${k.broken} patladı, ${k.left} kaldı`);
+    }
     const stand = (await reachCenter(bot, opts.dist || 9, say)).surface;
     const top = fountainTop(bot) || 62;
     const L = layout(stand);
