@@ -476,7 +476,12 @@ async function killDragon(bot, say = () => {}, opts = {}) {
       bot._noFill = null;
       await digCell(base.offset(0, 2, 0));
       if (base.y < perch.y) await digCell(base.offset(0, 3, 0));
-      for (let i = 0; i < 5 && H.cellOf(bot).y < perch.y + 2; i++) await H.pillarUp(bot);
+      for (let i = 0; i < 5 && H.cellOf(bot).y < perch.y + 2; i++) {
+        // Önceki zıplamadan inmeden tekrar zıplanmıyor (ikinci yükselme hep başarısızdı).
+        for (let k = 0; k < 20 && !bot.entity.onGround; k++) await A.sleep(50);
+        await A.sleep(150);
+        await H.pillarUp(bot);
+      }
       up = H.cellOf(bot).y >= perch.y + 2;
       if (!up) { A.dbg("yükselemedim, tavanı kapatıyorum"); await H.placeMany(bot, shellOf(H.cellOf(bot)), 4); }
       upAt = Date.now();
