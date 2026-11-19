@@ -408,7 +408,7 @@ async function killDragon(bot, say = () => {}, opts = {}) {
       const k = await shootCrystals(bot, say, opts.crystalMs || 120000);
       say(`Kristaller (platformdan): ${k.broken} patladı, ${k.left} kaldı`);
     }
-    const stand = (await reachCenter(bot, opts.dist || 9, say)).surface;
+    const stand = (await reachCenter(bot, opts.dist || 12, say)).surface;
     const top = fountainTop(bot) || 62;
     const L = layout(stand);
     // Sığınak: duruş yerinde 2 blok aşağı kaz, üstünü kapat. Yer altında ejderha bizi
@@ -468,8 +468,10 @@ async function killDragon(bot, say = () => {}, opts = {}) {
     // bakan taraf açık kalır (ejderha bizi görsün).
     const [px, pz] = [-wz, wx];
     const top2 = perch.offset(0, 2, 0); // yukarıdayken ayaklarımızın hücresi (zemin hizası)
-    const Lup = { dir: [wx, wz], bedFoot: top2.offset(wx + 2 * px, 1, wz + 2 * pz), supports: [] };
-    const sideWall = [top2.offset(px, 1, pz), top2.offset(px, 2, pz), top2.offset(wx + px, 1, wz + pz), top2.offset(wx + px, 2, wz + pz)];
+    // Yatak 3 önde 2 yanda (fıskiyeye ~9): kafa oraya iniyor. Duvar yatakla aramızda ama
+    // fıskiyeye giden görüş hattının yanında (ejderha bizi görsün, uzun otursun).
+    const Lup = { dir: [wx, wz], bedFoot: top2.offset(3 * wx + 2 * px, 1, 3 * wz + 2 * pz), supports: [] };
+    const sideWall = [1, 2].flatMap((dy) => [top2.offset(wx + px, dy, wz + pz), top2.offset(2 * wx + px, dy, 2 * wz + pz)]);
     const popUp = async () => {
       bot._noFill = null;
       await digCell(base.offset(0, 2, 0));
