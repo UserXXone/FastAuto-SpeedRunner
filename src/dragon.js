@@ -88,9 +88,9 @@ async function reachCenter(bot, dist = 7, say = () => {}) {
   A.dbg("End tüneli:", r, H.cellOf(bot).toString());
   const gy = groundAt(bot, sx, sz);
   if (gy == null) return { surface: H.cellOf(bot) };
-  // Sığınak: ayak gy-2, baş gy-1; tavan gy doğal End taşı (hiç kazılmaz). gy-1'de
+  // Sığınak: ayak gy-1 (baş zemin hizasında), tavan gy+1 bizim bloğumuz: yüzeye çıkmak için tek blok kazıp bir kez yükseliriz.
   // durunca tavanı kazmak gerekiyordu, boşluktan ateş topu girip üstümüze bulut düştü.
-  r = await H.highway(bot, new Vec3(sx, gy - 2, sz), { maxMs: 90000, enclosed: true, descendEarly: true });
+  r = await H.highway(bot, new Vec3(sx, gy - 1, sz), { maxMs: 90000, enclosed: true, descendEarly: true });
   A.dbg("sığınak yeri:", r, H.cellOf(bot).toString());
   return { surface: new Vec3(sx, gy + 1, sz) };
 
@@ -98,7 +98,7 @@ async function reachCenter(bot, dist = 7, say = () => {}) {
 
 // Duruş yerinin fıskiye yönündeki iki hücre: duvar (1 blok önde, 2 yüksek) ve yatak yeri (2 blok önde).
 const BED_RAISE = Number(process.env.BED_RAISE || 2);
-const POPUP = process.env.EJDERHA_CIK === "1"; // inişte yüzeye çık (deneysel)
+const POPUP = process.env.EJDERHA_CIK !== "0"; // inişte yüzeye çık: görmediği oyuncu için ~hiç oturmuyor (ölçüldü)
 function layout(stand) {
   const d = Math.hypot(stand.x, stand.z) || 1;
   const ux = -stand.x / d;
@@ -420,7 +420,7 @@ async function killDragon(bot, say = () => {}, opts = {}) {
     L.wall = [];
     say(`Duruş ${stand}, fıskiye tepesi y=${top}, yatak ${L.bedFoot}`);
     const [wx, wz] = L.dir;
-    for (let i = 0; i < 3 && H.cellOf(bot).y > stand.y - 3; i++) {
+    for (let i = 0; i < 3 && H.cellOf(bot).y > stand.y - 2; i++) {
       const below = bot.blockAt(H.cellOf(bot).offset(0, -1, 0));
       if (!below || below.boundingBox !== "block" || below.name === "bedrock") break;
       try {
@@ -463,14 +463,14 @@ async function killDragon(bot, say = () => {}, opts = {}) {
     // Yüzeydeyken yatak yanda (1 önde, 2 yanda), patlama ile aramızda yan duvar; fıskiyeye
     // bakan taraf açık kalır (ejderha bizi görsün).
     const [px, pz] = [-wz, wx];
-    const top2 = perch.offset(0, 2, 0); // yüzeyde ayaklarımızın hücresi
-    const Lup = { dir: [wx, wz], bedFoot: top2.offset(wx + 2 * px, 0, wz + 2 * pz), supports: [] };
-    const sideWall = [top2.offset(px, 0, pz), top2.offset(px, 1, pz), top2.offset(wx + px, 1, wz + pz)];
+    const top2 = perch.offset(0, 1, 0); // yukarıdayken ayaklarımızın hücresi (zemin hizası)
+    const Lup = { dir: [wx, wz], bedFoot: top2.offset(wx + 2 * px, 1, wz + 2 * pz), supports: [] };
+    const sideWall = [top2.offset(px, 1, pz), top2.offset(px, 2, pz), top2.offset(wx + px, 1, wz + pz), top2.offset(wx + px, 2, wz + pz)];
     const popUp = async () => {
       bot._noFill = null;
       await digCell(perch.offset(0, 2, 0));
-      for (let i = 0; i < 3 && H.cellOf(bot).y < perch.y + 2; i++) await H.pillarUp(bot);
-      up = H.cellOf(bot).y >= perch.y + 2;
+      for (let i = 0; i < 3 && H.cellOf(bot).y < perch.y + 1; i++) await H.pillarUp(bot);
+      up = H.cellOf(bot).y >= perch.y + 1;
       upAt = Date.now();
       if (up) {
         bot._noFill = [H.cellOf(bot), H.cellOf(bot).offset(0, 1, 0)];
