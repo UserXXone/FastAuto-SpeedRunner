@@ -350,7 +350,14 @@ async function killDragon(bot, say = () => {}, opts = {}) {
   let bombs = 0;
   const onDead = (e) => { if (e.name === "ender_dragon") killed = true; };
   const onBar = (b) => { if (b && typeof b.health === "number") bot._dragonHp = b.health; };
-  const onHurt = (who, src) => { if (who === bot.entity && src && src.name === "ender_dragon") bot._dragonHurtAt = Date.now(); };
+  const onHurt = (who, src) => {
+    if (who !== bot.entity || !src || src.name !== "ender_dragon") return;
+    bot._dragonHurtAt = Date.now();
+    const me = bot.entity.position;
+    const cl = Object.values(bot.entities).filter((e) => e.name === "area_effect_cloud" && e.position.distanceTo(me) < 12)
+      .map((e) => `${e.position.x.toFixed(1)},${e.position.y.toFixed(1)},${e.position.z.toFixed(1)}`);
+    A.dbg(`ejderha vurdu: ben ${me.x.toFixed(1)},${me.y.toFixed(1)},${me.z.toFixed(1)} | bulutlar: ${cl.join(" ") || "yok"} | ejderha ${src.position.x.toFixed(0)},${src.position.y.toFixed(0)},${src.position.z.toFixed(0)}`);
+  };
   bot.on("entityHurt", onHurt);
   bot.on("bossBarUpdated", onBar);
   bot.on("bossBarCreated", onBar);
