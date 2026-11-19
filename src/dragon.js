@@ -76,8 +76,9 @@ async function reachCenter(bot, dist = 7, say = () => {}) {
   A.dbg("End tüneli:", r, H.cellOf(bot).toString());
   const gy = groundAt(bot, sx, sz);
   if (gy == null) return { surface: H.cellOf(bot) };
-  // Sığınak: yüzeyin 2 blok altı (ayak gy-1, baş gy): üstümüzde toprak, yatak yüzeyde.
-  r = await H.highway(bot, new Vec3(sx, gy - 1, sz), { maxMs: 90000, enclosed: true, descendEarly: true });
+  // Sığınak: ayak gy-2, baş gy-1; tavan gy doğal End taşı (hiç kazılmaz). gy-1'de
+  // durunca tavanı kazmak gerekiyordu, boşluktan ateş topu girip üstümüze bulut düştü.
+  r = await H.highway(bot, new Vec3(sx, gy - 2, sz), { maxMs: 90000, enclosed: true, descendEarly: true });
   A.dbg("sığınak yeri:", r, H.cellOf(bot).toString());
   return { surface: new Vec3(sx, gy + 1, sz) };
 
@@ -375,7 +376,7 @@ async function killDragon(bot, say = () => {}, opts = {}) {
     L.wall = [];
     say(`Duruş ${stand}, fıskiye tepesi y=${top}, yatak ${L.bedFoot}`);
     const [wx, wz] = L.dir;
-    for (let i = 0; i < 3 && H.cellOf(bot).y > stand.y - 2; i++) {
+    for (let i = 0; i < 3 && H.cellOf(bot).y > stand.y - 3; i++) {
       const below = bot.blockAt(H.cellOf(bot).offset(0, -1, 0));
       if (!below || below.boundingBox !== "block" || below.name === "bedrock") break;
       try {
