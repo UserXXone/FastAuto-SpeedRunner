@@ -328,8 +328,8 @@ async function netherKosu(args) {
       const [px, pz] = [Math.round(info.portal[0] / 8), Math.round(info.portal[1] / 8)];
       const d = Math.hypot(wx - px, wz - pz) || 1;
       const tx = Math.round(wx + ((wx - px) / d) * 64), tz = Math.round(wz + ((wz - pz) / d) * 64);
-      for (const it of ["stone_pickaxe", "stone_pickaxe", "stone_pickaxe", "stone_sword", "netherrack 128", "cooked_beef 12", "blaze_rod 6"])
-        await rcon.komut(`give ${username} ${it}`);
+      for (const it of ["stone_pickaxe", "stone_pickaxe", "stone_pickaxe", "stone_sword", "netherrack 128", "cooked_beef 12", "blaze_rod 6"]) await rcon.komut(`give ${username} ${it}`);
+      await rcon.komut(`item replace entity ${username} armor.feet with golden_boots`); // piglinler saldırmasın (gerçek koşuda yıkık portal sandığından)
       await rcon.komut(`execute in minecraft:the_nether run spreadplayers ${tx} ${tz} 0 8 under 100 false ${username}`);
       await sleep(4000);
     }
