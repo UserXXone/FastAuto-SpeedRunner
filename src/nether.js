@@ -324,6 +324,10 @@ async function stageDragon(bot, timer, say) {
   const r = await D.killDragon(bot, say);
   timer.split(`EJDERHA (${r.bombs} yatak)`);
   say(`🐉 Ejderha öldü! Süre: ${fmt(timer.elapsed())}`);
+  if (await D.enterExitPortal(bot, say)) {
+    timer.split("Çıkış portalı (oyun bitti)");
+    say(`🏁 Oyun bitti! Süre: ${fmt(timer.elapsed())}`);
+  } else throw new Error("Ejderha öldü ama çıkış portalına girilemedi");
 }
 
 /**

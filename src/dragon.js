@@ -518,4 +518,35 @@ async function killDragon(bot, say = () => {}, opts = {}) {
   return { killed, bombs, ms: Date.now() - t0 };
 }
 
-module.exports = { killDragon, dragon, fountainTop, perched, beds };
+// Ejderha ölünce fıskiyede çıkış portalı açılır: içine gir (jenerik, sonra Overworld).
+async function enterExitPortal(bot, say = () => {}, maxMs = 90000) {
+  const t0 = Date.now();
+  const id = bot.registry.blocksByName.end_portal.id;
+  bot._noFill = null;
+  // Portala girince sunucu "oyunu kazandın" (jenerik) gönderir; jeneriği geçip Overworld'e dön.
+  let won = false;
+  const onState = (p) => {
+    if (p && (p.reason === 4 || p.reason === "win_game")) {
+      won = true;
+      try { bot._client.write("client_command", { actionId: 0 }); } catch (e) { /* */ }
+    }
+  };
+  bot._client.on("game_state_change", onState);
+  try {
+  while (!won && bot.game.dimension === "the_end" && Date.now() - t0 < maxMs) {
+    const p = bot.findBlock({ matching: id, maxDistance: 24 });
+    if (!p) { await A.sleep(1000); continue; }
+    say(`Çıkış portalı: ${p.position}`);
+    // Portal yere gömülü (bedrock çanağın içinde): üstüne yürüyüp düşeriz.
+    const r = await H.highway(bot, p.position.offset(0, 1, 0), { maxMs: 30000, range: 0 });
+    A.dbg("çıkış portalına:", r, H.cellOf(bot).toString());
+    if (bot.game.dimension === "the_end") await A.goto(bot, new GoalNear(p.position.x, p.position.y, p.position.z, 0), 8000);
+    for (let i = 0; i < 40 && !won && bot.game.dimension === "the_end"; i++) await A.sleep(100);
+  }
+  } finally {
+    bot._client.removeListener("game_state_change", onState);
+  }
+  return won || bot.game.dimension !== "the_end";
+}
+
+module.exports = { enterExitPortal, killDragon, dragon, fountainTop, perched, beds };
