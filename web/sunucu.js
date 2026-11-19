@@ -387,6 +387,7 @@ function ciz () {
   let t = 0
   const as = veri.asamalar || []
   if (veri.calisiyor && veri.kosuBaslangic) t = simdi - veri.kosuBaslangic
+  else if (veri.kosuBaslangic && veri.guncellendi) t = veri.guncellendi * 1000 - veri.kosuBaslangic
   else if (as.length) t = as[as.length - 1].total
   document.getElementById('sayac').textContent = dk(Math.max(0, t))
   document.getElementById('asama').textContent = veri.calisiyor ? (veri.asama || '') : (veri.asama ? 'Bitti: ' + veri.asama : '')
@@ -630,7 +631,7 @@ async function istek (req, res) {
     const aktif = (await servisDurumu(KOSU_BIRIM)) === 'active' || (await servisDurumu(TOPLU_BIRIM)) === 'active'
     return gonder(res, 200, 'application/json; charset=utf-8', JSON.stringify({
       calisiyor: Boolean(aktif && du.calisiyor), seed: du.seed || null, asama: du.asama || null,
-      asamalar: du.asamalar || [], kosuBaslangic: du.kosuBaslangic || null, simdi: Date.now()
+      asamalar: du.asamalar || [], kosuBaslangic: du.kosuBaslangic || null, guncellendi: du.guncellendi || null, simdi: Date.now()
     }))
   }
 

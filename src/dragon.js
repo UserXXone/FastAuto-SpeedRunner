@@ -279,13 +279,19 @@ async function killDragon(bot, say = () => {}, opts = {}) {
       // Ejderha ateş topunun mor bulutu (nefes) üstümüzdeyse kaç: içinde durunca öldük.
       const cloud = Object.values(bot.entities).find((e) => e.name === "area_effect_cloud" && e.position.distanceTo(bot.entity.position) < 4.5);
       if (cloud) {
-        const away = bot.entity.position.minus(cloud.position);
+        // Bulutun merkezi tam üstümüzdeyse "uzağı" yok: fıskiyeden dışarı doğru kaç.
+        let away = bot.entity.position.minus(cloud.position);
+        if (Math.hypot(away.x, away.z) < 1) away = bot.entity.position.clone();
         const n = Math.hypot(away.x, away.z) || 1;
-        const tx = Math.round(bot.entity.position.x + (away.x / n) * 6);
-        const tz = Math.round(bot.entity.position.z + (away.z / n) * 6);
+        const tx = Math.round(bot.entity.position.x + (away.x / n) * 8);
+        const tz = Math.round(bot.entity.position.z + (away.z / n) * 8);
         A.dbg("nefes bulutu: kaçıyorum", tx, tz);
-        await A.goto(bot, new GoalNearXZ(tx, tz, 1), 5000);
-        for (let i = 0; i < 40 && bot.entities[cloud.id] && cloud.position.distanceTo(stand) < 4.5; i++) await A.sleep(250);
+        if (!(await A.goto(bot, new GoalNearXZ(tx, tz, 1), 6000))) {
+          // Yol bulucu olmadı (kendi tüpümüz/duvar): kazarak kaç.
+          await H.highway(bot, { x: tx, y: null, z: tz }, { range: 1, maxMs: 8000 });
+        }
+        const cloudNearStand = () => Object.values(bot.entities).some((e) => e.name === "area_effect_cloud" && e.position.distanceTo(stand) < 5);
+        for (let i = 0; i < 60 && cloudNearStand(); i++) await A.sleep(250);
         await A.goto(bot, new GoalNear(stand.x, stand.y, stand.z, 0), 8000);
         continue;
       }
