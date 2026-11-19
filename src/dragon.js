@@ -350,6 +350,8 @@ async function killDragon(bot, say = () => {}, opts = {}) {
   let bombs = 0;
   const onDead = (e) => { if (e.name === "ender_dragon") killed = true; };
   const onBar = (b) => { if (b && typeof b.health === "number") bot._dragonHp = b.health; };
+  const onHurt = (who, src) => { if (who === bot.entity && src && src.name === "ender_dragon") bot._dragonHurtAt = Date.now(); };
+  bot.on("entityHurt", onHurt);
   bot.on("bossBarUpdated", onBar);
   bot.on("bossBarCreated", onBar);
   bot.on("entityDead", onDead);
@@ -408,7 +410,10 @@ async function killDragon(bot, say = () => {}, opts = {}) {
       }
       // Ejderha ateş topunun mor bulutu (nefes) üstümüzdeyse kaç: içinde durunca öldük.
       // Bulut yerde: ayağımız ondan 1,5 blok yukarıdaysa (direkteyiz) dokunmaz.
-      const cloud = Object.values(bot.entities).find((e) => e.name === "area_effect_cloud" && Math.abs(bot.entity.position.y - e.position.y) < 1.5 && e.position.distanceTo(bot.entity.position) < 6);
+      // Sadece gerçekten vuruluyorsak kaç: sığınaktayken üstümüzdeki bulut dokunmuyor,
+      // kaçmaya kalkınca dışarı çıkıp öldük.
+      const hurtRecently = Date.now() - (bot._dragonHurtAt || 0) < 1500;
+      const cloud = hurtRecently && Object.values(bot.entities).find((e) => e.name === "area_effect_cloud" && e.position.distanceTo(bot.entity.position) < 8);
       if (cloud) {
         // Bulutun merkezi tam üstümüzdeyse "uzağı" yok: fıskiyeden dışarı doğru kaç.
         let away = bot.entity.position.minus(cloud.position);
@@ -482,6 +487,7 @@ async function killDragon(bot, say = () => {}, opts = {}) {
   } finally {
     bot._noFill = null;
     bot.removeListener("entityDead", onDead);
+    bot.removeListener("entityHurt", onHurt);
   }
   return { killed, bombs, ms: Date.now() - t0 };
 }
