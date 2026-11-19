@@ -129,8 +129,9 @@ function servisDurumu (ad = SERVIS) {
 }
 
 // Bot koşusu da geçici bir systemd birimi. Durdurulunca (SIGTERM) sunucusunu kapatır.
-const KOSU_HEDEF = ['nether', 'blaze', 'pearl', 'kale']
-const KOSU_BASLA = ['bastan', 'portal', 'dokum', 'kale']
+const KOSU_HEDEF = ['nether', 'blaze', 'pearl', 'kale', 'ejderha']
+const KOSU_BASLA = ['bastan', 'portal', 'dokum', 'kale', 'warped', 'end']
+const TOPLU_BIRIM = 'seed-toplu'
 function kosuBaslat (seed, hedef = 'blaze', basla = 'bastan') {
   const ek = ['--hedef', hedef]
   if (basla !== 'bastan') ek.push('--basla', basla)
@@ -142,6 +143,46 @@ function kosuBaslat (seed, hedef = 'blaze', basla = 'bastan') {
       process.execPath, path.join(KOK, 'src', 'index.js'), 'nether', '--seed', seed, ...ek
     ], { timeout: 15000 }, (err, out, hata) => (err ? reject(new Error(String(hata || err.message))) : resolve()))
   })
+}
+
+// Toplu deneme: kosu/toplu.js seed'leri sırayla koşturur (tek systemd birimi).
+function topluBaslat (adet, hedef) {
+  return new Promise((resolve, reject) => {
+    execFile('systemd-run', [
+      `--unit=${TOPLU_BIRIM}`, '--collect', '--quiet',
+      `--property=WorkingDirectory=${KOK}`, '--property=TimeoutStopSec=60',
+      process.execPath, path.join(KOK, 'kosu', 'toplu.js'), '--adet', String(adet), '--hedef', hedef
+    ], { timeout: 15000 }, (err, out, hata) => (err ? reject(new Error(String(hata || err.message))) : resolve()))
+  })
+}
+
+const gercekKosu = (r) => !r.basla || r.basla === 'bastan'
+
+// Her aşama için en iyi (en kısa) toplam süre; aşamalar ilk göründükleri sırayla.
+function enIyiAsamalar (kosular) {
+  const m = new Map()
+  for (const r of kosular) {
+    if (!gercekKosu(r)) continue
+    for (const a of r.asamalar || []) {
+      if (typeof a.total !== 'number') continue
+      const e = m.get(a.name)
+      if (!e || a.total < e.total) m.set(a.name, { name: a.name, total: a.total, seed: r.seed, zaman: r.zaman })
+    }
+  }
+  return [...m.values()]
+}
+
+// Hedef başına gerçek koşu sayısı ve başarı.
+function kosuOzet (kosular) {
+  const m = new Map()
+  for (const r of kosular) {
+    if (!gercekKosu(r)) continue
+    const e = m.get(r.hedef) || { hedef: r.hedef, kosu: 0, basarili: 0 }
+    e.kosu++
+    if (r.basarili) e.basarili++
+    m.set(r.hedef, e)
+  }
+  return [...m.values()]
 }
 
 function kosuOku () {
@@ -171,6 +212,18 @@ function servisKomut (komut) {
 // Anahtar giriş kodundan türetilir: kod değişince eski paketler de geçersiz olur.
 function yuklemeAnahtari (ayar) {
   return imza(ayar, 'yukleme-anahtari').slice(0, 32).toUpperCase()
+}
+
+// OBS yayın sayfası giriş yapamaz: adrese eklenen anahtarla açılır.
+function yayinAnahtari (ayar) {
+  return imza(ayar, 'yayin-anahtari').slice(0, 24)
+}
+
+function yayinYetkili (ayar, url, girisli) {
+  if (girisli) return true
+  const a = Buffer.from(yayinAnahtari(ayar))
+  const b = Buffer.from(String(url.searchParams.get('anahtar') || ''))
+  return a.length === b.length && crypto.timingSafeEqual(a, b)
 }
 
 function anahtarDogru (ayar, gelen) {
@@ -310,6 +363,53 @@ function sayfa (baslik, govde) {
 <title>${baslik}</title><link rel="stylesheet" href="/stil.css"></head><body>${govde}</body></html>`
 }
 
+// OBS tarayıcı kaynağı: saydam arka plan, büyük sayaç, aşama listesi.
+const YAYIN_CSP = "default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; connect-src 'self'; frame-ancestors *"
+function yayinSayfasi () {
+  return `<!doctype html><html lang="tr"><head><meta charset="utf-8">
+<meta name="robots" content="noindex, nofollow"><title>Yayın</title>
+<style>
+html,body{margin:0;background:transparent;color:#fff;font-family:ui-monospace,Consolas,monospace;font-weight:700}
+body{padding:12px;-webkit-text-stroke:0;text-shadow:-2px -2px 0 #000,2px -2px 0 #000,-2px 2px 0 #000,2px 2px 0 #000,0 0 6px #000}
+#sayac{font-size:84px;line-height:1}
+#asama{font-size:30px;margin:6px 0 10px;color:#ffe066}
+#seed{font-size:16px;opacity:.85}
+.satir{font-size:26px;display:flex;gap:24px;justify-content:space-between;max-width:520px}
+</style></head><body>
+<div id="sayac">0:00</div><div id="asama"></div><div id="liste"></div><div id="seed"></div>
+<script>
+const dk = (ms) => { const s = Math.floor(ms / 1000); return Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0') }
+const anahtar = new URLSearchParams(location.search).get('anahtar') || ''
+let veri = null, fark = 0
+function ciz () {
+  if (!veri) return
+  const simdi = Date.now() + fark
+  let t = 0
+  const as = veri.asamalar || []
+  if (veri.calisiyor && veri.kosuBaslangic) t = simdi - veri.kosuBaslangic
+  else if (as.length) t = as[as.length - 1].total
+  document.getElementById('sayac').textContent = dk(Math.max(0, t))
+  document.getElementById('asama').textContent = veri.calisiyor ? (veri.asama || '') : (veri.asama ? 'Bitti: ' + veri.asama : '')
+  document.getElementById('seed').textContent = veri.seed ? 'seed ' + veri.seed : ''
+  const l = document.getElementById('liste'); l.textContent = ''
+  for (const a of as) {
+    const d = document.createElement('div'); d.className = 'satir'
+    const x = document.createElement('span'); x.textContent = a.name
+    const y = document.createElement('span'); y.textContent = dk(a.total)
+    d.append(x, y); l.append(d)
+  }
+}
+async function cek () {
+  try {
+    const r = await fetch('/api/yayin?anahtar=' + encodeURIComponent(anahtar), { cache: 'no-store' })
+    if (r.ok) { veri = await r.json(); fark = veri.simdi - Date.now() }
+  } catch (e) { /* bağlantı yok */ }
+  ciz()
+}
+cek(); setInterval(cek, 1000); setInterval(ciz, 200)
+</script></body></html>`
+}
+
 // Giriş yapılmamış ziyaretçi Okul Zili tanıtım sayfasını görür; kod penceresi gizli düğmeyle açılır.
 function girisSayfasi (mesaj) {
   return tanitimSayfasi(mesaj)
@@ -355,6 +455,7 @@ function panelSayfasi () {
           <option value="blaze" selected>Blaze çubukları</option>
           <option value="pearl">Ender gözleri (deneysel)</option>
           <option value="kale">End portalını aç (deneysel)</option>
+          <option value="ejderha">Ejderhayı öldür (deneysel)</option>
         </select>
       </label>
       <label>Başlangıç
@@ -363,6 +464,8 @@ function panelSayfasi () {
           <option value="portal">Test: portalın yanında, aletlerle</option>
           <option value="dokum">Test: portal + kova (obsidyen dökme)</option>
           <option value="kale">Test: kalenin üstünde, 12 gözle</option>
+          <option value="warped">Test: warped forest'ta enderman avı</option>
+          <option value="end">Test: End'de, yataklarla ejderha</option>
         </select>
       </label>
     </div>
@@ -370,12 +473,23 @@ function panelSayfasi () {
       <span id="kBilgi">Koşu yok.</span>
       <button id="kDurdur" type="button" class="ikincil" disabled>Koşuyu durdur</button>
     </div>
+    <div class="kontrol">
+      <label>Toplu <input id="tAdet" type="number" min="1" max="50" step="1" value="5" style="width:4em"></label>
+      <button id="tBaslat" type="button">Toplu koş</button>
+      <span id="tBilgi" class="soluk"></span>
+    </div>
+    <p class="soluk" id="kOzet"></p>
     <p class="soluk">Yukarıdaki tabloda bir seed'in <b>Koş</b> düğmesine bas. Bot o seed'le bu sunucuda geçici bir dünya açar ve koşar.
     Düğme sadece portalı sandıkla tamamlanabilen ve yakılabilen seed'lerde çıkar. Koşu sürerken avcı duraklatılır.</p>
     <div id="kAsamalar"></div>
+    <p class="soluk" id="kYayin"></p>
   </div>
   <div class="tablo-kutu"><table id="kosular"><thead><tr>
     <th>Zaman</th><th>Seed</th><th>Sonuç</th><th>Süre</th><th>Aşamalar</th>
+  </tr></thead><tbody></tbody></table></div>
+  <h3>En iyi aşama süreleri</h3>
+  <div class="tablo-kutu"><table id="enIyiAsama"><thead><tr>
+    <th>Aşama</th><th>En iyi</th><th>Seed</th><th>Tarih</th>
   </tr></thead><tbody></tbody></table></div>
 
   <h2>En iyi seed'ler <span class="soluk">(yol puanı = tahmini yol süresi saniye, düşük = iyi; oyunun tamamı değil)</span></h2>
@@ -503,6 +617,23 @@ async function istek (req, res) {
     return gonder(res, 303, 'text/plain', '', { Location: '/', 'Set-Cookie': 'seed_oturum=; Path=/; Max-Age=0; HttpOnly; Secure; SameSite=Strict' })
   }
 
+  if (url.pathname === '/yayin' || url.pathname === '/api/yayin') {
+    const ip = istemciIp(req)
+    if (!girisli && engelliMi(ip)) return gonder(res, 429, 'text/plain; charset=utf-8', 'Çok fazla hatalı deneme')
+    if (!yayinYetkili(ayar, url, girisli)) {
+      hataKaydet(ip)
+      return gonder(res, 401, 'text/plain; charset=utf-8', 'Giriş ya da anahtar gerekli')
+    }
+    if (url.pathname === '/yayin') return gonder(res, 200, 'text/html; charset=utf-8', yayinSayfasi(), { 'Content-Security-Policy': YAYIN_CSP, 'X-Frame-Options': 'SAMEORIGIN' })
+    const ks = kosuOku()
+    const du = ks.durum || {}
+    const aktif = (await servisDurumu(KOSU_BIRIM)) === 'active' || (await servisDurumu(TOPLU_BIRIM)) === 'active'
+    return gonder(res, 200, 'application/json; charset=utf-8', JSON.stringify({
+      calisiyor: Boolean(aktif && du.calisiyor), seed: du.seed || null, asama: du.asama || null,
+      asamalar: du.asamalar || [], kosuBaslangic: du.kosuBaslangic || null, simdi: Date.now()
+    }))
+  }
+
   if (!girisli) {
     if (url.pathname === '/') return gonder(res, 200, 'text/html; charset=utf-8', girisSayfasi())
     return gonder(res, 401, 'text/plain; charset=utf-8', 'Giriş gerekli')
@@ -526,10 +657,15 @@ async function istek (req, res) {
     d.toplamPc = toplamOku()
     const ks = kosuOku()
     const kosuAktif = (await servisDurumu(KOSU_BIRIM)) === 'active'
+    const topluAktif = (await servisDurumu(TOPLU_BIRIM)) === 'active'
     d.kosu = {
-      calisiyor: kosuAktif,
-      durum: ks.durum && (kosuAktif || !ks.durum.calisiyor) ? ks.durum : null,  // süreç öldüyse eski "çalışıyor" kaydını gösterme
+      calisiyor: kosuAktif || topluAktif,
+      durum: ks.durum && (kosuAktif || topluAktif || !ks.durum.calisiyor) ? ks.durum : null,  // süreç öldüyse eski "çalışıyor" kaydını gösterme
       sonlar: ks.kosular.slice(-10).reverse(),
+      enIyiAsamalar: enIyiAsamalar(ks.kosular),
+      ozet: kosuOzet(ks.kosular),
+      toplu: { ...jsonOku(path.join(KOK, 'kosu', 'veri', 'toplu.json'), {}), aktif: topluAktif },
+      yayinUrl: `${PANEL_URL}/yayin?anahtar=${yayinAnahtari(ayar)}`,
       zaman: Date.now()
     }
     for (const s of d.enIyiler) {
@@ -586,8 +722,10 @@ async function istek (req, res) {
       return gonder(res, 400, 'text/plain; charset=utf-8', 'Hatalı istek')
     }
     const aktif = (await servisDurumu(KOSU_BIRIM)) === 'active'
+    const topluAktif = (await servisDurumu(TOPLU_BIRIM)) === 'active'
     try {
       if (g.eylem === 'baslat') {
+        if (topluAktif) return gonder(res, 409, 'text/plain; charset=utf-8', 'Toplu deneme sürüyor')
         const seed = String(g.seed || '')
         if (!SEED_RE.test(seed)) return gonder(res, 400, 'text/plain; charset=utf-8', 'Hatalı seed')
         if (aktif) return gonder(res, 409, 'text/plain; charset=utf-8', 'Zaten bir koşu sürüyor')
@@ -595,7 +733,15 @@ async function istek (req, res) {
         const hedef = KOSU_HEDEF.includes(g.hedef) ? g.hedef : 'blaze'
         const basla = KOSU_BASLA.includes(g.basla) ? g.basla : 'bastan'
         await kosuBaslat(seed, hedef, basla)
+      } else if (g.eylem === 'toplu') {
+        if (aktif || topluAktif) return gonder(res, 409, 'text/plain; charset=utf-8', 'Zaten bir koşu sürüyor')
+        if ((await servisDurumu(DOGRULAMA_BIRIM)) === 'active') return gonder(res, 409, 'text/plain; charset=utf-8', 'Doğrulama sürüyor; önce onu durdur (ikisine birden RAM yetmez)')
+        const adet = Number(g.adet)
+        if (!tam(adet, 1, 50)) return gonder(res, 400, 'text/plain; charset=utf-8', 'Adet 1 ile 50 arasında olmalı')
+        const hedef = KOSU_HEDEF.includes(g.hedef) ? g.hedef : 'blaze'
+        await topluBaslat(adet, hedef)
       } else if (g.eylem === 'durdur') {
+        if (topluAktif) execFile('systemctl', ['stop', TOPLU_BIRIM], { timeout: 90000 }, () => {})
         if (aktif) execFile('systemctl', ['stop', KOSU_BIRIM], { timeout: 60000 }, () => {})
       } else {
         return gonder(res, 400, 'text/plain; charset=utf-8', 'Hatalı eylem')

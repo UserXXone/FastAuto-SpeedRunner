@@ -128,16 +128,26 @@ $('#tpKaydet') && $('#tpKaydet').addEventListener('click', async () => {
 $('#tpSayi') && $('#tpSayi').addEventListener('input', (e) => { e.target.dataset.elle = '1' })
 
 $('#kDurdur') && $('#kDurdur').addEventListener('click', () => kosuIstek({ eylem: 'durdur' }))
+$('#tBaslat') && $('#tBaslat').addEventListener('click', () => kosuIstek({ eylem: 'toplu', adet: Number($('#tAdet').value), hedef: $('#kHedef').value }))
 
 const dk = (ms) => { const s = Math.floor(ms / 1000); return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}` }
 let mesgul = false  // koşu ya da doğrulama sürüyor
 
-const HEDEF_AD = { nether: 'Nether\'a girdi', blaze: 'Blaze çubukları', pearl: 'Ender gözleri', kale: 'End portalı açıldı' }
+const HEDEF_AD = { nether: 'Nether\'a girdi', blaze: 'Blaze çubukları', pearl: 'Ender gözleri', kale: 'End portalı açıldı', ejderha: 'Ejderha öldü' }
 
 function kosuCiz (k) {
   if (!k || !$('#kosular')) return
   const du = k.durum
   $('#kDurdur').disabled = !k.calisiyor
+  $('#tBaslat').disabled = mesgul
+  const tp = k.toplu
+  $('#tBilgi').textContent = tp && tp.aktif && tp.calisiyor
+    ? `Toplu: ${Math.min(tp.indeks + 1, tp.sira.length)}/${tp.sira.length} — seed ${tp.sira[tp.indeks] || ''}`
+    : (tp && tp.bitti ? `Son toplu bitti (${(tp.sira || []).length} seed, hedef ${tp.hedef}).` : '')
+  $('#kOzet').textContent = (k.ozet || []).length
+    ? 'Başarı: ' + k.ozet.map((o) => `${o.hedef} ${o.basarili}/${o.kosu}`).join(', ')
+    : ''
+  $('#kYayin').textContent = k.yayinUrl ? `OBS için yayın adresi: ${k.yayinUrl}` : ''
   let bilgi = 'Koşu yok.'
   if (k.calisiyor && du) {
     const gecen = du.kosuBaslangic ? ` — ${dk(k.zaman - du.kosuBaslangic)}` : ''
@@ -166,6 +176,15 @@ function kosuCiz (k) {
     const tr = el('tr'); const t = el('td', 'soluk', 'Henüz koşu yok.'); t.colSpan = 5; tr.append(t); satirlar.push(tr)
   }
   $('#kosular tbody').replaceChildren(...satirlar)
+  const ea = (k.enIyiAsamalar || []).map((a) => {
+    const tr = el('tr')
+    for (const x of [a.name, dk(a.total), a.seed, new Date(a.zaman * 1000).toLocaleDateString('tr-TR')]) tr.append(el('td', null, x))
+    return tr
+  })
+  if (!ea.length) {
+    const tr = el('tr'); const t = el('td', 'soluk', 'Henüz gerçek koşu yok.'); t.colSpan = 4; tr.append(t); ea.push(tr)
+  }
+  $('#enIyiAsama tbody').replaceChildren(...ea)
 }
 
 function kosDugmesi (r) {

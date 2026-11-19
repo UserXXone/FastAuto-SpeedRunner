@@ -126,6 +126,8 @@ npm run nether -- --seed -2192408593595833481
 - Çerçevenin içinde kalan ot, sarmaşık, toprak gibi blokları temizler. Çerçevede ağlayan obsidyen varsa kırar, ama taş kazmayla tanesi yaklaşık 1 dakika sürer.
 - Sandıkta altın zırh varsa giyer (Nether'da piglinler saldırmasın diye).
 - Koşu sonuçları `kosu/veri/kosular.json` dosyasına yazılır.
+- Panelde bot koşusu kartında: hedef `ejderha`, test başlangıçları `warped` ve `end`; **Toplu koş** (doğrulanmış en iyi N seed'i sırayla koşturur, `node kosu/toplu.js --adet N --hedef H`, ilerleme `kosu/veri/toplu.json`); hedef başına başarı özeti; "En iyi aşama süreleri" tablosu (sadece baştan koşular).
+- OBS için yayın görünümü: panelde koşu kartının altındaki "OBS için yayın adresi" (`/yayin?anahtar=...`) tarayıcı kaynağı olarak eklenir. Saydam arka planlı sayaç, aşama ve ara süreler 1 sn'de bir yenilenir. Anahtar giriş koduna bağlıdır; kod değişince adres de değişir.
 
 | Seçenek | Açıklama |
 |---------|----------|
