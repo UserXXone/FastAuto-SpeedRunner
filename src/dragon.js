@@ -64,7 +64,20 @@ async function reachCenter(bot, dist = 7, say = () => {}) {
   const head = bot.inventory.slots[5];
   let r;
   if (head && head.name === "carved_pumpkin") {
-    r = (await A.goto(bot, new GoalNearXZ(sx, sz, 2), 120000)) ? "arrived" : "goto-failed";
+    // Uzun yolu yol bulucu tek seferde çözemiyor: 20 bloklık parçalar.
+    for (let i = 0; i < 12; i++) {
+      const p = bot.entity.position;
+      const left = Math.hypot(sx - p.x, sz - p.z);
+      if (left <= 3) { r = "arrived"; break; }
+      const k = Math.min(1, 20 / left);
+      const wx = Math.round(p.x + (sx - p.x) * k);
+      const wz = Math.round(p.z + (sz - p.z) * k);
+      if (!(await A.goto(bot, new GoalNearXZ(wx, wz, 2), 40000))) {
+        // Yol bulucu olmadı: bu parçayı açık havada kapalı tüple geç (yüzey hizasında).
+        const gy = groundAt(bot, wx, wz);
+        await H.highway(bot, { x: wx, y: gy != null ? gy + 1 : null, z: wz }, { range: 2, enclosed: true, maxMs: 60000 });
+      }
+    }
   }
   if (r !== "arrived") r = await H.highway(bot, { x: sx, y: null, z: sz }, { range: 2, enclosed: true, maxMs: 300000, descendEarly: true, harvest: 64 });
   A.dbg("End otoyolu:", r, H.cellOf(bot).toString());
