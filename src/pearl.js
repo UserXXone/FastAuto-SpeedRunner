@@ -339,6 +339,11 @@ async function huntEndermen(bot, need, say, opts = {}) {
   let lastStock = 0;
   let lastHp = bot.health;
   const tries = new Map(); // id -> kaç kez kızdırıldı
+  // Direkten inmek güvenli mi: yakında (32) son 60 sn'de kızdırılmış ya da 8 blok içinde enderman yok.
+  const safeToLeave = () => {
+    const me = bot.entity.position;
+    return !endermen(bot, 8).length && ![...lured.entries()].some(([id, t]) => bot.entities[id] && Date.now() - t < 60000 && bot.entities[id].position.distanceTo(me) < 32);
+  };
   // Aynı anda en çok 3 kızgın enderman: hepsi kapsülün dibine gelip sırayla kesilir.
   const angryCount = () => [...lured.entries()].filter(([id, t]) => bot.entities[id] && Date.now() - t < 30000).length;
   const onGone = (e) => {
@@ -395,7 +400,7 @@ async function huntEndermen(bot, need, say, opts = {}) {
       } else {
         // Yerde pearl varsa ve yanımızda kızgın enderman yoksa kapsülü oraya yürüt.
         const drop = pearlDrops(bot, 12)[0];
-        if (drop && drop.position.distanceTo(bot.entity.position) > 1.4 && angryCount() === 0 && bot.health >= 12 && !near.some((e) => e.position.distanceTo(bot.entity.position) < 8)) {
+        if (drop && drop.position.distanceTo(bot.entity.position) > 1.4 && angryCount() === 0 && safeToLeave() && bot.health >= 12 && !near.some((e) => e.position.distanceTo(bot.entity.position) < 8)) {
           const p = drop.position;
           const cell = new Vec3(Math.floor(p.x), Math.floor(p.y + 0.3), Math.floor(p.z));
           if (MODE === "direk") await leavePillar(bot);
@@ -424,7 +429,7 @@ async function huntEndermen(bot, need, say, opts = {}) {
             A.dbg("enderman kızdırıldı:", target.position.distanceTo(bot.entity.position).toFixed(1), "blok");
             lastLure = Date.now();
           } else lastLure = Date.now() - 4000; // görülen yok: 2 sn sonra tekrar bak
-        } else if ((!near.length && Date.now() - lastLure > 30000) || Date.now() - lastSuccess > 30000) {
+        } else if (((!near.length && Date.now() - lastLure > 30000) || Date.now() - lastSuccess > 30000) && safeToLeave()) {
           lastSuccess = Date.now();
           // Görünürde enderman yok: biraz yer değiştir.
           lastLure = Date.now();
