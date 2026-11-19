@@ -157,6 +157,30 @@ async function bedBomb(bot, L) {
   return ok;
 }
 
+// Buluttan uzağa düz koş (zıplayarak, sprint). Önümüz kapalıysa yan dön.
+async function fleeFrom(bot, cloud) {
+  const cloudsNear = () => Object.values(bot.entities).filter((e) => e.name === "area_effect_cloud" && e.position.distanceTo(bot.entity.position) < 5);
+  const base = Math.atan2(bot.entity.position.x - cloud.position.x, bot.entity.position.z - cloud.position.z);
+  const tries = [0, Math.PI / 2, -Math.PI / 2, Math.PI / 4, -Math.PI / 4];
+  for (const off of tries) {
+    if (!cloudsNear().length) break;
+    const ang = (Math.hypot(bot.entity.position.x - cloud.position.x, bot.entity.position.z - cloud.position.z) < 1
+      ? Math.atan2(bot.entity.position.x, bot.entity.position.z) : base) + off;
+    // mineflayer yaw: bakış yönü (-sin y, -cos y); "ang" yönüne bakmak için:
+    const yaw = Math.atan2(-Math.sin(ang), -Math.cos(ang));
+    await bot.look(yaw, 0, true);
+    bot.setControlState("forward", true);
+    bot.setControlState("sprint", true);
+    bot.setControlState("jump", true);
+    const p0 = bot.entity.position.clone();
+    await A.sleep(1300);
+    C.stopMoving(bot);
+    bot.setControlState("sprint", false);
+    bot.setControlState("jump", false);
+    if (bot.entity.position.distanceTo(p0) < 2) A.dbg("kaçış yönü kapalı, başka yön");
+  }
+}
+
 // --- Ok ---------------------------------------------------------------------
 // Tam gerilmiş ok: hız 3 blok/tik, yerçekimi 0,05/tik, sürtünme 0,99/tik.
 // Hedefin yatay uzaklığında yüksekliği tutturan eğimi deneme ile bul.
@@ -292,10 +316,8 @@ async function killDragon(bot, say = () => {}, opts = {}) {
         const tx = Math.round(bot.entity.position.x + (away.x / n) * 8);
         const tz = Math.round(bot.entity.position.z + (away.z / n) * 8);
         A.dbg("nefes bulutu: kaçıyorum", tx, tz);
-        if (!(await A.goto(bot, new GoalNearXZ(tx, tz, 1), 6000))) {
-          // Yol bulucu olmadı (kendi tüpümüz/duvar): kazarak kaç.
-          await H.highway(bot, { x: tx, y: null, z: tz }, { range: 1, maxMs: 8000 });
-        }
+        // Yol bulucu bulutun içinde saniyelerce düşünüyordu (öldük): düz koş, zıplayarak.
+        await fleeFrom(bot, cloud);
         const cloudNearStand = () => Object.values(bot.entities).some((e) => e.name === "area_effect_cloud" && e.position.distanceTo(stand) < 5);
         // Bulut dağılana kadar boş bekleme: bu sırada kristale/ejderhaya ok at.
         const tw = Date.now();
