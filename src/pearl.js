@@ -87,10 +87,21 @@ async function placeNoRecurse(bot, p) {
 // Enderman 2,9 blok boyunda: çatının altına giremez, en yakın 2 blok öteden
 // vuramaz (yetişme ~1,4). Biz 4,2 menzille vururuz; yanlar açık olduğu için
 // baktığımız enderman bizi görür, kızar ve çatının kenarına gelir.
-const HUT = (process.env.PEARL_MODE || "hut") === "hut";
+const MODE = process.env.PEARL_MODE || "direk";
+const HUT = MODE === "hut" || MODE === "direk";
+const HUT_RAISE = Number(process.env.HUT_RAISE || 2);
 async function buildHut(bot) {
   for (let i = 0; i < 20 && !bot.entity.onGround; i++) await A.sleep(50);
-  const c = H.cellOf(bot);
+  let c = H.cellOf(bot);
+  const solidAt0 = (p) => (bot.blockAt(p) || {}).boundingBox === "block";
+  const built = [[-1, -1], [1, 1], [0, 0]].every(([dx, dz]) => solidAt0(c.offset(dx, 2, dz)));
+  if (!built) {
+    // 2 blok yüksel: zemin kenarı aşağıdaki endermanları gizliyordu (ölçüldü: engellerin
+    // çoğu 2-3 blok ötedeki nylium). Platformun altı 2 blok: enderman oraya da giremez.
+    for (let i = 0; i < HUT_RAISE; i++) if (!(await H.pillarUp(bot))) break;
+    for (let i = 0; i < 20 && !bot.entity.onGround; i++) await A.sleep(50);
+    c = H.cellOf(bot);
+  }
   const mid = c.offset(0.5, 0, 0.5);
   for (let i = 0; i < 12 && Math.hypot(bot.entity.position.x - mid.x, bot.entity.position.z - mid.z) > 0.12; i++) {
     await bot.lookAt(new Vec3(mid.x, bot.entity.position.y + 1.62, mid.z), true);
@@ -152,7 +163,49 @@ function canSee(bot, target) {
   return !bot.world.raycast(eye, dir, eye.distanceTo(to), (b) => b && b.boundingBox === "block");
 }
 
-const shelter = (bot) => (HUT ? buildHut(bot) : sealCapsule(bot));
+// Direk: 1x1, 3 blok yüksek sütunun tepesi. Enderman 2,9 boyunda: dibinde dururken
+// vuruş kutusu ayağımıza (3 blok) yetişmez; biz 4,2 menzille vururuz. Çatı yok,
+// yan yok: her yön açık, görüş en iyi (çatı ve zemin kenarı görüşü kapatıyordu).
+const PILLAR = 3;
+function onPillar(bot) {
+  const c = H.cellOf(bot);
+  for (let i = 1; i <= PILLAR; i++) if ((bot.blockAt(c.offset(0, -i, 0)) || {}).boundingBox !== "block") return false;
+  // Yanlarda sağlam blok olmamalı (enderman oraya çıkıp yanımıza gelir).
+  return [[1, 0], [-1, 0], [0, 1], [0, -1]].every(([dx, dz]) => (bot.blockAt(c.offset(dx, -1, dz)) || {}).boundingBox !== "block");
+}
+async function buildPillar(bot) {
+  if (bot._pillarTop && H.cellOf(bot).equals(bot._pillarTop)) return true;
+  for (let i = 0; i < 20 && !bot.entity.onGround; i++) await A.sleep(50);
+  for (let i = 0; i < PILLAR + 2; i++) {
+    if (!(await H.pillarUp(bot))) break;
+    if (i >= PILLAR - 1 && onPillar(bot)) break;
+  }
+  const ok = onPillar(bot);
+  bot._pillarTop = ok ? H.cellOf(bot) : null;
+  if (!ok) A.dbg("direk olmadı:", H.cellOf(bot).toString());
+  return ok;
+}
+// Direkten in (altımızı kazarak): yere düşen pearl'leri almak için.
+async function leavePillar(bot) {
+  bot._pillarTop = null;
+  for (let i = 0; i < PILLAR + 1; i++) {
+    const below = bot.blockAt(H.cellOf(bot).offset(0, -1, 0));
+    if (!below || below.boundingBox !== "block" || !H.MINEABLE.has(below.name)) break;
+    // Altında bizim koyduğumuz blok değil, doğal zemin varsa dur.
+    const under = bot.blockAt(below.position.offset(0, -1, 0));
+    if (under && under.boundingBox === "block" && i >= PILLAR - 1) break;
+    try {
+      await A.withHand(bot, async () => {
+        const { item } = A.fastestTool(bot, below);
+        if (item && (!bot.heldItem || bot.heldItem.type !== item.type)) await bot.equip(item, "hand");
+        await bot.dig(below, true);
+      });
+    } catch (err) { break; }
+    for (let k = 0; k < 20 && !bot.entity.onGround; k++) await A.sleep(50);
+    await A.sleep(100);
+  }
+}
+const shelter = (bot) => (MODE === "direk" ? buildPillar(bot) : HUT ? buildHut(bot) : sealCapsule(bot));
 
 async function sealCapsule(bot) {
   // Bloğun ortasında dur: kenardaysak gövdemiz komşu hücreye taşar, sunucu oraya
@@ -299,6 +352,7 @@ async function huntEndermen(bot, need, say, opts = {}) {
         A.dbg(
           `enderman avı: can ${bot.health.toFixed(0)} pearl ${pearls(bot)}/${need} öldürülen ${kills} görünen ${near.length}`,
           near[0] ? `en yakın ${near[0].position.distanceTo(bot.entity.position).toFixed(1)}` : "",
+          "engel:", (() => { const eye = bot.entity.position.offset(0, 1.62, 0); const m = {}; for (const e of near.slice(0, 15)) { const to = e.position.offset(0, ENDERMAN_EYE, 0); const h = bot.world.raycast(eye, to.minus(eye).normalize(), eye.distanceTo(to), (b) => b && b.boundingBox === "block"); const k = h ? `${h.name}@${h.position.distanceTo(eye).toFixed(0)}` : "AÇIK"; m[k] = (m[k] || 0) + 1; } return JSON.stringify(m); })(),
           "kızgınlar(menzil):", [...lured.keys()].filter((id) => bot.entities[id]).map((id) => C.reachDistance(bot, bot.entities[id]).toFixed(1)).join(" "),
         );
       }
@@ -322,6 +376,7 @@ async function huntEndermen(bot, need, say, opts = {}) {
         if (drop && drop.position.distanceTo(bot.entity.position) > 1.4 && angryCount() === 0 && bot.health >= 12 && !near.some((e) => e.position.distanceTo(bot.entity.position) < 8)) {
           const p = drop.position;
           const cell = new Vec3(Math.floor(p.x), Math.floor(p.y + 0.3), Math.floor(p.z));
+          if (MODE === "direk") await leavePillar(bot);
           // Warped forest'ta düşman yok (enderman bakmazsan dokunmaz): açıktan yürü, blok harcama.
           const r = await A.goto(bot, new GoalNear(cell.x, cell.y, cell.z, 0.5), 15000);
           A.dbg("pearl'e yürüündü:", r);
@@ -373,6 +428,7 @@ async function huntEndermen(bot, need, say, opts = {}) {
           }
           const gx = best ? best.x : c.x + [24, 0, -24, 0][Math.floor(Math.random() * 4)];
           const gz = best ? best.z : c.z + [0, 24, 0, -24][Math.floor(Math.random() * 4)];
+          if (MODE === "direk") await leavePillar(bot);
           A.dbg("enderman avı: yer değiştiriyorum", gx, gz, `(${pool.length} enderman, oradan görünen ~${bestN.toFixed(1)})`);
           bot.pathfinder.setGoal(best ? new GoalNear(best.x, best.y + 1, best.z, 1) : new GoalNearXZ(gx, gz, 3));
           const tw = Date.now();
