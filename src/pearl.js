@@ -254,7 +254,7 @@ async function huntEndermen(bot, need, say, opts = {}) {
           const r = await A.goto(bot, new GoalNear(cell.x, cell.y, cell.z, 0.5), 15000);
           A.dbg("pearl'e yürüündü:", r);
           await sealCapsule(bot);
-        } else if (near.length && bot.health >= 12 && Date.now() - lastLure > 2000 && angryCount() < 3 && Date.now() - lastSuccess <= 45000) {
+        } else if (near.length && bot.health >= 12 && Date.now() - lastLure > 2000 && angryCount() < 3 && Date.now() - lastSuccess <= 30000) {
           // Kızdıracak enderman: bize yakın ve aşağı yukarı aynı yükseklikte olan.
           // Kızdıracak enderman: kapsülün bir duvar bloğunu açınca görülebilen.
           const target = near.find((e) => e.position.distanceTo(bot.entity.position) >= 3 && !(Date.now() - (lured.get(e.id) || 0) < 20000) && windowFor(bot, e));
@@ -270,13 +270,21 @@ async function huntEndermen(bot, need, say, opts = {}) {
             A.dbg("enderman kızdırıldı:", target.position.distanceTo(bot.entity.position).toFixed(1), "blok");
             lastLure = Date.now();
           } else lastLure = Date.now() - 4000; // görülen yok: 2 sn sonra tekrar bak
-        } else if ((!near.length && Date.now() - lastLure > 30000) || Date.now() - lastSuccess > 45000) {
+        } else if ((!near.length && Date.now() - lastLure > 30000) || Date.now() - lastSuccess > 30000) {
           lastSuccess = Date.now();
           // Görünürde enderman yok: biraz yer değiştir.
           lastLure = Date.now();
+          // Endermanların toplandığı yere (görünenlerin ortası) yürü; yoksa 24 blok rastgele.
           const c = H.cellOf(bot);
-          const dir = [[12, 0], [0, 12], [-12, 0], [0, -12]][Math.floor(Math.random() * 4)];
-          await A.goto(bot, new GoalNearXZ(c.x + dir[0], c.z + dir[1], 2), 20000);
+          const pool = endermen(bot, 96).filter((e) => e.position.distanceTo(bot.entity.position) > 10);
+          let gx = c.x + [24, 0, -24, 0][Math.floor(Math.random() * 4)];
+          let gz = c.z + [0, 24, 0, -24][Math.floor(Math.random() * 4)];
+          if (pool.length) {
+            gx = Math.round(pool.reduce((a, e) => a + e.position.x, 0) / pool.length);
+            gz = Math.round(pool.reduce((a, e) => a + e.position.z, 0) / pool.length);
+          }
+          A.dbg("enderman avı: yer değiştiriyorum", gx, gz, `(${pool.length} enderman)`);
+          await A.goto(bot, new GoalNearXZ(gx, gz, 6), 30000);
           await sealCapsule(bot);
         }
       }
