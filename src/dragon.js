@@ -12,6 +12,7 @@
 //   4. Ejderha ölene kadar tekrarla.
 
 const { Vec3 } = require("vec3");
+const { goals: { GoalNearXZ } } = require("mineflayer-pathfinder");
 const A = require("./actions");
 const C = require("./combat");
 const H = require("./highway");
@@ -58,8 +59,14 @@ async function reachCenter(bot, dist = 7, say = () => {}) {
   const sx = Math.round((me.x / d) * dist);
   const sz = Math.round((me.z / d) * dist);
   say(`Adanın ortasına gidiyorum (${sx}, ${sz})`);
-  // Ortaya kadar kapalı tünel: End'de endermanlar çok, bakarsak saldırırlar.
-  let r = await H.highway(bot, { x: sx, y: null, z: sz }, { range: 2, enclosed: true, maxMs: 300000, descendEarly: true, harvest: 64 });
+  // Kafamızda balkabağı varsa endermanlar bize kızmaz: adanın üstünden yürü (End
+  // taşını kazmak yavaş: blok başına ~1,1 sn). Yoksa kapalı tünel.
+  const head = bot.inventory.slots[5];
+  let r;
+  if (head && head.name === "carved_pumpkin") {
+    r = (await A.goto(bot, new GoalNearXZ(sx, sz, 2), 120000)) ? "arrived" : "goto-failed";
+  }
+  if (r !== "arrived") r = await H.highway(bot, { x: sx, y: null, z: sz }, { range: 2, enclosed: true, maxMs: 300000, descendEarly: true, harvest: 64 });
   A.dbg("End otoyolu:", r, H.cellOf(bot).toString());
   const gy = groundAt(bot, sx, sz);
   if (gy != null) {
