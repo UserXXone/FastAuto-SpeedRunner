@@ -204,13 +204,7 @@ async function buildPillar(bot) {
   // Fincan: ayak hizasında 4 yan duvar (altlarına birer çıkıntı). Ok/vuruş sekmesi
   // bizi direkten düşürüyordu (piglin oku, enderman). Duvarlar ayak hizasında: göz
   // hizası açık, görüş kapanmaz.
-  {
-    const c = H.cellOf(bot);
-    const cells = [];
-    for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) cells.push(c.offset(dx, -1, dz));
-    for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) cells.push(c.offset(dx, 0, dz));
-    await H.placeMany(bot, cells, 3);
-  }
+  await buildPillarCup(bot);
   bot._noFill = null;
   const ok = onPillar(bot);
   bot._pillarTop = ok ? H.cellOf(bot) : null;
@@ -220,6 +214,15 @@ async function buildPillar(bot) {
       "yan:", [[1, 0], [-1, 0], [0, 1], [0, -1]].map(([dx, dz]) => (bot.blockAt(c.offset(dx, -1, dz)) || {}).name).join(","));
   }
   return ok;
+}
+async function buildPillarCup(bot) {
+  const c = H.cellOf(bot);
+  const cells = [];
+  for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) cells.push(c.offset(dx, -1, dz));
+  for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) cells.push(c.offset(dx, 0, dz));
+  bot._noFill = [c, c.offset(0, 1, 0)];
+  await H.placeMany(bot, cells, 3);
+  bot._noFill = null;
 }
 // Direkten in (altımızı kazarak): yere düşen pearl'leri almak için.
 async function leavePillar(bot) {
@@ -350,22 +353,43 @@ async function huntEndermen(bot, need, say, opts = {}) {
   let lastSuccess = Date.now();
   let lastStock = 0;
   let lastHp = bot.health;
+  let sonVurulma = 0;
+  let vuranId = null;
+  let hurtSerial = 0;
+  let handledHurt = 0;
   const dropSeen = new Map();
   const tries = new Map(); // id -> kaç kez kızdırıldı
-  // Direkten inmek güvenli mi: yakında (32) son 60 sn'de kızdırılmış ya da 8 blok içinde enderman yok.
+  // Direkten inmek güvenli mi: yakın tehdit ve yakın zamanda alınan vuruş yok.
   const safeToLeave = () => {
     const me = bot.entity.position;
-    return !endermen(bot, 8).length && ![...lured.entries()].some(([id, t]) => bot.entities[id] && Date.now() - t < 60000 && bot.entities[id].position.distanceTo(me) < 32);
+    return !(Date.now() - sonVurulma < 30000) && !endermen(bot, 10).length && ![...lured.entries()].some(([id, t]) => bot.entities[id] && Date.now() - t < 60000 && bot.entities[id].position.distanceTo(me) < 32);
   };
   // Aynı anda en çok 3 kızgın enderman: hepsi kapsülün dibine gelip sırayla kesilir.
   const angryCount = () => [...lured.entries()].filter(([id, t]) => bot.entities[id] && Date.now() - t < 30000).length;
   const onGone = (e) => {
     if (hit.delete(e.id)) kills++;
   };
+  const onHurt = (who, src) => {
+    if (who !== bot.entity || !src || src.name !== "enderman") return;
+    sonVurulma = Date.now();
+    vuranId = src.id;
+    hurtSerial++;
+  };
   bot.on("entityGone", onGone);
+  bot.on("entityHurt", onHurt);
   try {
     await shelter(bot);
     while (pearls(bot) < need) {
+      // Vuruşa ilk işte karşılık ver; yerdeysek hemen direk kur.
+      if (handledHurt !== hurtSerial) {
+        handledHurt = hurtSerial;
+        A.dbg("enderman vurdu:", vuranId);
+        if (MODE === "direk" && bot._pillarTop) {
+          await H.pillarUp(bot);
+          bot._pillarTop = H.cellOf(bot);
+          await buildPillarCup(bot);
+        } else await shelter(bot);
+      }
       if (Date.now() - t0 > maxMs) throw new Error(`Enderman avı çok uzun sürdü (${pearls(bot)}/${need} pearl)`);
       if (bot.inLavaEscape) {
         await A.sleep(100);
@@ -483,6 +507,7 @@ async function huntEndermen(bot, need, say, opts = {}) {
           // isMoving() yol hesaplanırken false: döngü hemen bitiyordu, bot hiç yürümüyordu.
           await A.sleep(400);
           while (Date.now() - tw < 25000) {
+            if (!safeToLeave()) break;
             if (prey && bot.entities[prey.id] && prey.position.distanceTo(bot.entity.position) < 9) break;
             if (!prey && !bot.pathfinder.isMoving() && Date.now() - tw > 3000) break;
             if (endermen(bot, 40).some((e) => (tries.get(e.id) || 0) < 2 && e.position.distanceTo(bot.entity.position) > 4 && e.position.distanceTo(bot.entity.position) < 16 && canSee(bot, e))) break;
@@ -494,17 +519,14 @@ async function huntEndermen(bot, need, say, opts = {}) {
         }
       }
       if (!inReach && (bot.food < 18 || (bot.health < 14 && bot.food < 20)) && C.bestFood(bot)) await C.eat(bot);
-      // Vurulduysak kapsülde delik var: kapat.
-      if (bot.health < lastHp) {
-        // Direkteyken vurulduk: bir blok daha yüksel.
-        if (MODE === "direk" && bot._pillarTop) { await H.pillarUp(bot); bot._pillarTop = H.cellOf(bot); }
-        else await shelter(bot);
-      }
+      // Enderman dışı hasarda da barınağı yeniden kur.
+      if (bot.health < lastHp && handledHurt === hurtSerial) await shelter(bot);
       lastHp = bot.health;
       await A.sleep(50);
     }
   } finally {
     bot.removeListener("entityGone", onGone);
+    bot.removeListener("entityHurt", onHurt);
   }
   return { pearls: pearls(bot), kills, ms: Date.now() - t0 };
 }
