@@ -159,6 +159,28 @@ async function bedBomb(bot, L) {
   return ok;
 }
 
+// Ejderhanın kafası (vanilla: gövde + (sin yRot, -cos yRot)·6,5; mineflayer yaw = π − yRot;
+// inişte kafa gövdenin 1 blok altında).
+function headOf(d) {
+  return new Vec3(d.position.x + Math.sin(d.yaw) * 6.5, d.position.y - 1, d.position.z + Math.cos(d.yaw) * 6.5);
+}
+
+// Kafanın hemen altına yatak koy ve patlat. Uygun değilse null (sabit yere koyarız).
+async function headBomb(bot, d, avoid) {
+  const h = headOf(d);
+  const foot = new Vec3(Math.floor(h.x), Math.floor(h.y) - 1, Math.floor(h.z));
+  const eye = bot.entity.position.offset(0, 1.62, 0);
+  if (eye.distanceTo(foot.offset(0.5, 0.5, 0.5)) > 4.4) return null;
+  // Yatağın başı gövdeye doğru (kafadan gövdeye).
+  const gx = d.position.x - h.x, gz = d.position.z - h.z;
+  const [dx, dz] = Math.abs(gx) >= Math.abs(gz) ? [Math.sign(gx) || 1, 0] : [0, Math.sign(gz) || 1];
+  const cells = [foot, foot.offset(dx, 0, dz)];
+  if (cells.some((c) => avoid.some((a) => a.equals(c)))) return null;
+  A.dbg(`kafa ${h.x.toFixed(1)},${h.y.toFixed(1)},${h.z.toFixed(1)} gövde ${d.position.x.toFixed(1)},${d.position.y.toFixed(1)},${d.position.z.toFixed(1)} yaw ${d.yaw.toFixed(2)} → yatak ${foot}`);
+  await clearBedSpot(bot, { dir: [dx, dz], bedFoot: foot, supports: [] });
+  return bedBomb(bot, { dir: [dx, dz], bedFoot: foot });
+}
+
 // Yolda kurduğumuz kapalı tüpü aç (kırıktaş/netherrack): içinde kalınca nefesten
 // kaçamadık. Duvar hücrelerine dokunma.
 async function openTube(bot, stand, L) {
@@ -424,7 +446,9 @@ async function killDragon(bot, say = () => {}, opts = {}) {
         const head = bot.blockAt(L.bedFoot.offset(ddx, 0, ddz));
         const fiery = [spot, head].some((x) => x && /fire$/.test(x.name));
         if (!under.every(solid) || fiery || (spot && spot.boundingBox === "block")) await clearBedSpot(bot, L);
-        if (await bedBomb(bot, L)) {
+        let done = await headBomb(bot, d, [...shell, ...L.wall, perch, perch.offset(0, 1, 0)]);
+        if (done === null) done = await bedBomb(bot, L);
+        if (done) {
           bombs++;
           await A.sleep(150);
           const hx = d.position.x - Math.sin(d.yaw) * 6.5, hz = d.position.z - Math.cos(d.yaw) * 6.5;
@@ -438,7 +462,7 @@ async function killDragon(bot, say = () => {}, opts = {}) {
         const me = bot.entity.position;
         // Ok atmak için kapsülde pencere açılıyor: sadece ejderha uzaktayken (bizi
         // görüp ateş topu atmasın). Ejderhaya ok atmıyoruz (pencere açık kalırdı).
-        const far = !d || d.position.distanceTo(me) > 45;
+        const far = true; // kristaller iyileştiriyor (167→200 ölçüldü): her fırsatta vur
         const c = far && bow(bot) && arrows(bot) ? crystals(bot).filter((x) => !caged(bot, x) && (crystalTries.get(x.id) || 0) < 6)
           .sort((a, b) => a.position.distanceTo(me) - b.position.distanceTo(me))[0] : null;
         if (c) {
