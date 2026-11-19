@@ -247,11 +247,10 @@ async function killDragon(bot, say = () => {}, opts = {}) {
     say(`Duruş ${stand}, fıskiye tepesi y=${top}, yatak ${L.bedFoot}`);
     await H.placeMany(bot, L.wall, 3);
     await clearBedSpot(bot, L);
-    // Önce kristaller (iyileştiriyorlar ve dururken ejderha nadiren iniyor).
-    if (bow(bot) && arrows(bot)) {
-      const k = await shootCrystals(bot, say);
-      say(`Kristaller: ${k.broken} patladı, ${k.left} kaldı`);
-    }
+    // Kristalleri döngü içinde, ejderha havadayken teker teker vururuz: kristale
+    // kilitlenip inen ejderhayı kaçırıyorduk.
+    const crystalTries = new Map();
+    let crystalsBroken = 0;
     let lastLog = 0;
     while (!killed) {
       if (Date.now() - t0 > maxMs) throw new Error(`Ejderha çok uzun sürdü (${bombs} yatak)`);
@@ -291,8 +290,17 @@ async function killDragon(bot, say = () => {}, opts = {}) {
         await A.sleep(120);
       } else {
         if (bot.food < 18 && C.bestFood(bot)) await C.eat(bot);
-        // Ejderha havadayken, menzildeyse ok at (en azından can götürür).
-        if (d && bow(bot) && arrows(bot) > 8 && d.position.distanceTo(bot.entity.position) < 60) await shoot(bot, d, 1.5);
+        // Havada: önce kafessiz kristaller (iyileştiriyorlar, dururken ejderha az iniyor),
+        // bitince menzildeyse ejderhaya ok.
+        const me = bot.entity.position;
+        const c = bow(bot) && arrows(bot) ? crystals(bot).filter((x) => !caged(bot, x) && (crystalTries.get(x.id) || 0) < 6)
+          .sort((a, b) => a.position.distanceTo(me) - b.position.distanceTo(me))[0] : null;
+        if (c) {
+          crystalTries.set(c.id, (crystalTries.get(c.id) || 0) + 1);
+          await shoot(bot, c, 1.0);
+          await A.sleep(600);
+          if (!bot.entities[c.id]) { crystalsBroken++; say(`  kristal patladı (${crystalsBroken}), ${crystals(bot).length} kaldı`); }
+        } else if (d && bow(bot) && arrows(bot) > 8 && d.position.distanceTo(me) < 60) await shoot(bot, d, 1.5);
         else await A.sleep(200);
       }
     }
