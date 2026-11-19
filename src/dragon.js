@@ -37,7 +37,8 @@ function fountainTop(bot) {
 function groundAt(bot, x, z, fromY = 90) {
   for (let y = fromY; y > 0; y--) {
     const b = bot.blockAt(new Vec3(x, y, z));
-    if (b && b.boundingBox === "block") return y;
+    // Kendi tünelimizin blokları zemin değil.
+    if (b && b.boundingBox === "block" && !["cobblestone", "netherrack", "cobbled_deepslate"].includes(b.name)) return y;
   }
   return null;
 }
@@ -60,34 +61,17 @@ async function reachCenter(bot, dist = 7, say = () => {}) {
   const sx = Math.round((me.x / d) * dist);
   const sz = Math.round((me.z / d) * dist);
   say(`Adanın ortasına gidiyorum (${sx}, ${sz})`);
-  // Kafamızda balkabağı varsa endermanlar bize kızmaz: adanın üstünden yürü (End
-  // taşını kazmak yavaş: blok başına ~1,1 sn). Yoksa kapalı tünel.
-  const head = bot.inventory.slots[5];
-  let r;
-  if (head && head.name === "carved_pumpkin") {
-    // Uzun yolu yol bulucu tek seferde çözemiyor: 20 bloklık parçalar.
-    for (let i = 0; i < 12; i++) {
-      const p = bot.entity.position;
-      const left = Math.hypot(sx - p.x, sz - p.z);
-      if (left <= 3) { r = "arrived"; break; }
-      const k = Math.min(1, 20 / left);
-      const wx = Math.round(p.x + (sx - p.x) * k);
-      const wz = Math.round(p.z + (sz - p.z) * k);
-      if (!(await A.goto(bot, new GoalNearXZ(wx, wz, 2), 40000))) {
-        // Yol bulucu olmadı: bu parçayı açık havada kapalı tüple geç (yüzey hizasında).
-        const gy = groundAt(bot, wx, wz);
-        await H.highway(bot, { x: wx, y: gy != null ? gy + 1 : null, z: wz }, { range: 2, enclosed: true, maxMs: 60000 });
-      }
-    }
-  }
-  if (r !== "arrived") r = await H.highway(bot, { x: sx, y: null, z: sz }, { range: 2, enclosed: true, maxMs: 300000, descendEarly: true, harvest: 64 });
-  A.dbg("End otoyolu:", r, H.cellOf(bot).toString());
+  // Baştan sona kapalı tünel (çoğu yer altında): açıkta yürürken ejderha görüp ateş
+  // topu atıyor, defalarca yolda öldük. Tünelin içi görünmez.
+  let r = await H.longHaul(bot, { x: sx, z: sz }, { range: 2, minY: 50, maxY: 72, maxMs: 600000, harvest: 64 });
+  A.dbg("End tüneli:", r, H.cellOf(bot).toString());
   const gy = groundAt(bot, sx, sz);
-  if (gy != null) {
-    r = await H.highway(bot, new Vec3(sx, gy + 1, sz), { maxMs: 60000, enclosed: true, descendEarly: true });
-    A.dbg("duruş yeri:", r, H.cellOf(bot).toString());
-  }
-  return H.cellOf(bot);
+  if (gy == null) return { surface: H.cellOf(bot) };
+  // Sığınak: yüzeyin 2 blok altı (ayak gy-1, baş gy): üstümüzde toprak, yatak yüzeyde.
+  r = await H.highway(bot, new Vec3(sx, gy - 1, sz), { maxMs: 90000, enclosed: true, descendEarly: true });
+  A.dbg("sığınak yeri:", r, H.cellOf(bot).toString());
+  return { surface: new Vec3(sx, gy + 1, sz) };
+
 }
 
 // Duruş yerinin fıskiye yönündeki iki hücre: duvar (1 blok önde, 2 yüksek) ve yatak yeri (2 blok önde).
@@ -361,21 +345,7 @@ async function killDragon(bot, say = () => {}, opts = {}) {
   bot.on("bossBarCreated", onBar);
   bot.on("entityDead", onDead);
   try {
-    let stand = await reachCenter(bot, opts.dist || 9, say);
-    // Yolda atılan ateş topunun bulutu tam duracağımız yere düşmüş olabilir (vardığımız
-    // an hasar alıp öldük): bulutsuz bir yön seç (fıskiyenin 4 yanından biri).
-    const cloudAt = (p, r) => Object.values(bot.entities).some((e) => e.name === "area_effect_cloud" && Math.hypot(e.position.x - p.x - 0.5, e.position.z - p.z - 0.5) < r);
-    for (let k = 0; k < 4 && cloudAt(stand, 8); k++) {
-      const dist = opts.dist || 9;
-      const alts = [[dist, 0], [0, dist], [-dist, 0], [0, -dist]]
-        .map(([x, z]) => { const gy = groundAt(bot, x, z); return gy == null ? null : new Vec3(x, gy + 1, z); })
-        .filter((p) => p && !cloudAt(p, 8))
-        .sort((a, b) => a.distanceTo(bot.entity.position) - b.distanceTo(bot.entity.position));
-      if (!alts.length) { await A.sleep(1000); continue; }
-      A.dbg("duruş yerinde bulut: başka yana geçiyorum", alts[0].toString());
-      await A.goto(bot, new GoalNear(alts[0].x, alts[0].y, alts[0].z, 0), 20000);
-      stand = H.cellOf(bot);
-    }
+    const stand = (await reachCenter(bot, opts.dist || 9, say)).surface;
     const top = fountainTop(bot) || 62;
     const L = layout(stand);
     // Sığınak: duruş yerinde 2 blok aşağı kaz, üstünü kapat. Yer altında ejderha bizi
@@ -386,9 +356,8 @@ async function killDragon(bot, say = () => {}, opts = {}) {
     L.supports = [];
     L.wall = [];
     say(`Duruş ${stand}, fıskiye tepesi y=${top}, yatak ${L.bedFoot}`);
-    await openTube(bot, stand, L);
     const [wx, wz] = L.dir;
-    for (let i = 0; i < 2; i++) {
+    for (let i = 0; i < 3 && H.cellOf(bot).y > stand.y - 2; i++) {
       const below = bot.blockAt(H.cellOf(bot).offset(0, -1, 0));
       if (!below || below.boundingBox !== "block" || below.name === "bedrock") break;
       try {
