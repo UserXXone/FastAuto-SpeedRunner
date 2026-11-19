@@ -736,9 +736,27 @@ async function killDragonBowl(bot, say = () => {}, opts = {}) {
     A.dbg("çanak kapısı:", r2, H.cellOf(bot).toString());
     const side = (sx, sz) => new Vec3(sx * 2, floorY, sz * 2);
     let cur = [ax[0], ax[1]];
-    await A.goto(bot, new GoalNear(cur[0] * 2, floorY, cur[1] * 2, 0), 8000);
+    // Çanağa düz yürüyerek in (yol bulucu bu adımı bulamadı).
+    const walkTo = async (x, z, ms = 2500) => {
+      const t = Date.now();
+      try {
+        while (Date.now() - t < ms) {
+          const p = bot.entity.position;
+          const dist = Math.hypot(x + 0.5 - p.x, z + 0.5 - p.z);
+          if (dist < 0.3) break;
+          await bot.lookAt(new Vec3(x + 0.5, p.y + 1.62, z + 0.5), true);
+          bot.setControlState("forward", true);
+          await A.sleep(50);
+        }
+      } finally { C.stopMoving(bot); }
+    };
+    await walkTo(cur[0] * 2, cur[1] * 2);
+    for (let k = 0; k < 20 && !bot.entity.onGround; k++) await A.sleep(50);
+    A.dbg("çanakta:", H.cellOf(bot).toString());
     // Kapıyı kapat (yatak patlamasına siper de oluyor).
+    bot._noFill = [H.cellOf(bot), H.cellOf(bot).offset(0, 1, 0)];
     await H.placeMany(bot, [entry, entry.offset(0, 1, 0)], 3);
+    bot._noFill = null;
     say(`Çanaktayım ${H.cellOf(bot)}, fıskiye tepesi ${top}`);
     let lastLog = 0;
     let lastDodge = 0;
@@ -759,7 +777,11 @@ async function killDragonBowl(bot, say = () => {}, opts = {}) {
         const cx = cloud.position.x, cz = cloud.position.z;
         cur = Math.abs(cx) >= Math.abs(cz) ? [cx > 0 ? -1 : 1, 0] : [0, cz > 0 ? -1 : 1];
         A.dbg("bulut: çanağın öbür yanına", cur.join(","));
-        await A.goto(bot, new GoalNear(cur[0] * 2, floorY, cur[1] * 2, 0), 5000);
+        // Sütunun etrafından: önce çapraz köşe, sonra karşı taraf.
+        const here = H.cellOf(bot);
+        const mid = cur[0] !== 0 ? [Math.sign(here.x || 1), 2 * (here.z >= 0 ? 1 : -1)] : [2 * (here.x >= 0 ? 1 : -1), Math.sign(here.z || 1)];
+        await walkTo(cur[0] !== 0 ? 0 : mid[0], cur[0] !== 0 ? mid[1] : 0, 1500);
+        await walkTo(cur[0] * 2, cur[1] * 2, 2000);
         continue;
       }
       if (d && perched(bot, top)) {
