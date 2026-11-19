@@ -351,12 +351,27 @@ async function huntEndermen(bot, need, say, opts = {}) {
           // Endermanların toplandığı yere (görünenlerin ortası) yürü; yoksa 24 blok rastgele.
           const c = H.cellOf(bot);
           // Görülebilecek bir enderman bulana kadar en yakın (denenmemiş) endermana doğru yürü.
-          const pool = endermen(bot, 96).filter((e) => e.position.distanceTo(bot.entity.position) > 8 && (tries.get(e.id) || 0) < 2);
-          let gx = c.x + [24, 0, -24, 0][Math.floor(Math.random() * 4)];
-          let gz = c.z + [0, 24, 0, -24][Math.floor(Math.random() * 4)];
-          if (pool.length) { gx = Math.round(pool[0].position.x); gz = Math.round(pool[0].position.z); }
-          A.dbg("enderman avı: yer değiştiriyorum", gx, gz, `(${pool.length} enderman)`);
-          bot.pathfinder.setGoal(new GoalNearXZ(gx, gz, 10));
+          // En çok (denenmemiş) endermanı görebileceğimiz açık nylium noktasına git.
+          const pool = endermen(bot, 80).filter((e) => (tries.get(e.id) || 0) < 2);
+          const spots = openNylium(bot, 40).filter((p) => p.distanceTo(c) > 6);
+          let best = null;
+          let bestN = -1;
+          for (const sp of spots.filter((_, i) => i % Math.max(1, Math.ceil(spots.length / 60)) === 0)) {
+            const eye = sp.offset(0.5, 2.62, 0.5);
+            let n = 0;
+            for (const e of pool) {
+              const to = e.position.offset(0, ENDERMAN_EYE, 0);
+              const d = eye.distanceTo(to);
+              if (d < 6 || d > 48) continue;
+              if (!bot.world.raycast(eye, to.minus(eye).normalize(), d, (b) => b && b.boundingBox === "block")) n++;
+            }
+            const score = n - sp.distanceTo(c) / 20;
+            if (score > bestN) { bestN = score; best = sp; }
+          }
+          const gx = best ? best.x : c.x + [24, 0, -24, 0][Math.floor(Math.random() * 4)];
+          const gz = best ? best.z : c.z + [0, 24, 0, -24][Math.floor(Math.random() * 4)];
+          A.dbg("enderman avı: yer değiştiriyorum", gx, gz, `(${pool.length} enderman, oradan görünen ~${bestN.toFixed(1)})`);
+          bot.pathfinder.setGoal(best ? new GoalNear(best.x, best.y + 1, best.z, 1) : new GoalNearXZ(gx, gz, 3));
           const tw = Date.now();
           while (Date.now() - tw < 25000 && bot.pathfinder.isMoving()) {
             if (endermen(bot, 40).some((e) => (tries.get(e.id) || 0) < 2 && e.position.distanceTo(bot.entity.position) > 6 && canSee(bot, e))) break;
