@@ -354,8 +354,11 @@ async function killDragon(bot, say = () => {}, opts = {}) {
     // topları açıktayken bizi defalarca öldürdü. Yatağı kapsülün dışına, yere koyup
     // tıklarız (sunucu mesafeye bakar, görüşe değil).
     const shell = [];
-    for (const [sx, sz] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) shell.push(perch.offset(sx, 0, sz), perch.offset(sx, 1, sz));
-    shell.push(perch.offset(0, 2, 0));
+    for (const [sx, sz] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) shell.push(perch.offset(sx, 0, sz));
+    for (const [sx, sz] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) shell.push(perch.offset(sx, 1, sz));
+    // Tavan yan bloklara çapraz kalıyor, tutunamaz: önce yanına bir köprü bloğu.
+    shell.push(perch.offset(-wx, 2, -wz), perch.offset(0, 2, 0));
+    bot._noFill = [perch, perch.offset(0, 1, 0)];
     const reseal = async () => {
       if (shell.some((c) => (bot.blockAt(c) || {}).boundingBox !== "block")) await H.placeMany(bot, shell, 4);
     };
@@ -446,6 +449,7 @@ async function killDragon(bot, say = () => {}, opts = {}) {
       }
     }
   } finally {
+    bot._noFill = null;
     bot.removeListener("entityDead", onDead);
   }
   return { killed, bombs, ms: Date.now() - t0 };

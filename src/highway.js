@@ -25,6 +25,8 @@ const isOpen = (b) => Boolean(b && b.boundingBox === "empty" && !isLiquid(b) && 
 // Yürümeden, olduğun yerden bir hücreye dolgu bloğu koy. Komşu sağlam blok
 // yoksa önce altındaki hücreyi doldurmayı dener.
 async function placeFiller(bot, cell, depth = 0) {
+  // Kendi durduğumuz hücreler: alttan destek ararken buraya blok koymaya kalkmasın.
+  if (bot._noFill && bot._noFill.some((c) => c.equals(cell))) return false;
   const spot = bot.blockAt(cell);
   if (!spot) return false;
   if (isSolid(spot)) return true;
