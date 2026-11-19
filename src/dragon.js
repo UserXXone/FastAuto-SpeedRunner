@@ -171,7 +171,7 @@ const bow = (bot) => bot.inventory.items().find((i) => i.name === "bow");
 const arrows = (bot) => A.count(bot, (i) => i.name === "arrow");
 
 // Bir hedefe ok at (hareketliyse önüne). Dönen: atıldı mı.
-async function shoot(bot, target, height = 0.5) {
+async function shoot(bot, target, height = 0.5, opts = {}) {
   const b = bow(bot);
   if (!b || !arrows(bot)) return false;
   let ok = false;
@@ -191,6 +191,22 @@ async function shoot(bot, target, height = 0.5) {
     }
     if (!sol) { bot.deactivateItem(); return; }
     const yaw = Math.atan2(-(to.x - eye.x), -(to.z - eye.z));
+    // Okun ilk 4 bloğu açık mı? Kapalı tüpün içindeysek oklar duvara gidiyordu.
+    const dir = new Vec3(-Math.sin(yaw) * Math.cos(sol.a), Math.sin(sol.a), -Math.cos(yaw) * Math.cos(sol.a));
+    const hit = bot.world.raycast(eye, dir, 4, (bl) => bl && bl.boundingBox === "block");
+    if (hit) {
+      bot.deactivateItem();
+      const keep = opts.keep || [];
+      if (!["bedrock", "obsidian", "end_portal_frame"].includes(hit.name) && !keep.some((k) => k.equals(hit.position))) {
+        A.dbg("ok yolu kapalı, açıyorum:", hit.name, hit.position.toString());
+        try {
+          const { item } = A.fastestTool(bot, hit);
+          if (item) await bot.equip(item, "hand");
+          await bot.dig(hit, true);
+        } catch (err) { /* */ }
+      }
+      return;
+    }
     await bot.look(yaw, sol.a, true);
     await A.sleep(60);
     bot.deactivateItem(); // bırak
@@ -297,10 +313,10 @@ async function killDragon(bot, say = () => {}, opts = {}) {
           .sort((a, b) => a.position.distanceTo(me) - b.position.distanceTo(me))[0] : null;
         if (c) {
           crystalTries.set(c.id, (crystalTries.get(c.id) || 0) + 1);
-          await shoot(bot, c, 1.0);
+          await shoot(bot, c, 1.0, { keep: L.wall });
           await A.sleep(600);
           if (!bot.entities[c.id]) { crystalsBroken++; say(`  kristal patladı (${crystalsBroken}), ${crystals(bot).length} kaldı`); }
-        } else if (d && bow(bot) && arrows(bot) > 8 && d.position.distanceTo(me) < 60) await shoot(bot, d, 1.5);
+        } else if (d && bow(bot) && arrows(bot) > 16 && d.position.distanceTo(me) < 40) await shoot(bot, d, 1.5, { keep: L.wall });
         else await A.sleep(200);
       }
     }
