@@ -270,7 +270,7 @@ async function stagePearls(bot, info, timer, say, guard) {
   let r = (await A.goto(bot, new GoalNear(ground.x, ground.y, ground.z, 1), 60000)) ? "arrived" : "goto-failed";
   if (r !== "arrived") r = await H.highway(bot, ground, { maxMs: 120000, descendEarly: true, harvest: 96 });
   // Kapsül ve pencereler için blok lazım (yer değiştirince yeni kapsül ~10 blok).
-  if (A.count(bot, H.isFiller) < 40) await F.stockScaffold(bot, 80);
+  if (A.count(bot, H.isFiller) < 24) await F.stockScaffold(bot, 64);
   A.dbg("av yerine varış:", r, H.cellOf(bot).toString());
   timer.split("Warped forest'a varış");
 
