@@ -562,11 +562,14 @@ async function killDragon(bot, say = () => {}, opts = {}) {
       }
       // İniyor mu? Fıskiyeye yakın ve alçakta: yüzeye çık ki bizi görüp otursun.
       const landing = d && Math.hypot(d.position.x, d.position.z) < 14 && d.position.y < top + 12;
-      if (POPUP && !up && landing && Date.now() - upAt > 3000) { await popUp(); continue; }
+      // Yüzeye sadece ejderha OTURUNCA çık: yaklaşırken çıkınca açık şafttan bizi görüp ateş
+      // topu attı. Otururken ateş topu atmıyor; görmezse 5 sn sonra kalkıyor, o yüzden hızlı.
+      const sitting = d && perched(bot, top);
+      if (POPUP && !up && sitting && Date.now() - upAt > 3000) { await popUp(); continue; }
       // Yatak hazırda dursun: ejderha oturunca sadece tıklarız (görmezse 5 sn oturuyor).
       if (!up && !bot.blockAt(L.bedFoot)?.name?.endsWith("_bed") && beds(bot) && (!d || !perched(bot, top))) await placeBed(bot, L);
       if (up && !landing && Date.now() - upAt > 6000) { await dropDown("ejderha kalktı"); continue; }
-      if (d && perched(bot, top)) {
+      if (sitting && (up || !POPUP)) {
         // İniş ~50 sn: art arda patlat (duvarı sadece yıkıldıysa onar). Yavaş kalınca
         // (tur başına 5 sn) ejderha kafasıyla bizi öldürdü.
         const solid = (p) => (bot.blockAt(p) || {}).boundingBox === "block";
