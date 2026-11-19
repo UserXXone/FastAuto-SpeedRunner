@@ -54,6 +54,11 @@ function perched(bot, top) {
   trail.push({ t: now, p: p.clone() });
   while (trail.length && now - trail[0].t > 800) trail.shift();
   const moved = trail.length ? trail[0].p.distanceTo(p) : 99;
+  const near = Math.hypot(p.x, p.z) < 8 && p.y < top + 6;
+  if (near && (!bot._perchLog || now - bot._perchLog > 1000)) {
+    bot._perchLog = now;
+    A.dbg(`iniş?: ${p.x.toFixed(1)},${p.y.toFixed(1)},${p.z.toFixed(1)} kıpırdama ${moved.toFixed(2)} süre ${now - trail[0].t} tepe ${top}`);
+  }
   if (now - (trail[0] ? trail[0].t : now) < 500 || moved > 2.5) return false;
   // İnince gövde tam ortada durmuyor (ölçüldü: (2, 64, 5) gibi; kafası bize dönük).
   return Math.hypot(p.x, p.z) < 8 && p.y < top + 6;
