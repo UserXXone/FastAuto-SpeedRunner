@@ -248,16 +248,26 @@ const shelter = (bot) => (MODE === "direk" ? buildPillar(bot) : HUT ? buildHut(b
 async function sealCapsule(bot) {
   // Bloğun ortasında dur: kenardaysak gövdemiz komşu hücreye taşar, sunucu oraya
   // blok koymayı reddeder ve kapsül açık kalır (enderman vuruyor: can 0,2'ye indi).
+  // Yol bulucu hâlâ sürüyorsa (sokulmadan sonra) ortalamayı bozuyordu: durdur.
+  bot.pathfinder.setGoal(null);
+  bot.clearControlStates();
   for (let i = 0; i < 20 && !bot.entity.onGround; i++) await A.sleep(50);
   const c = H.cellOf(bot);
   const mid = c.offset(0.5, 0, 0.5);
-  for (let i = 0; i < 12 && Math.hypot(bot.entity.position.x - mid.x, bot.entity.position.z - mid.z) > 0.12; i++) {
+  // Eğilerek ortala (yavaş, savrulmadan): normal yürüyüşte hedefi aşıp komşu hücreye taşıyorduk.
+  bot.setControlState("sneak", true);
+  for (let i = 0; i < 30 && Math.hypot(bot.entity.position.x - mid.x, bot.entity.position.z - mid.z) > 0.12; i++) {
     await bot.lookAt(new Vec3(mid.x, bot.entity.position.y + 1.62, mid.z), true);
     bot.setControlState("forward", true);
     await A.sleep(50);
+    bot.setControlState("forward", false);
+    await A.sleep(30);
   }
   bot.setControlState("forward", false);
+  bot.setControlState("sneak", false);
   await A.sleep(100);
+  const off = Math.hypot(bot.entity.position.x - mid.x, bot.entity.position.z - mid.z);
+  if (off > 0.2) A.dbg("kapsül: ortalanamadı, sapma", off.toFixed(2));
   // Sıra önemli: zemin, yanlar, en son tavan (tavan ancak yan bloklara tutunur).
   const shell = [c.offset(0, -1, 0)];
   for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) shell.push(c.offset(dx, 0, dz));
