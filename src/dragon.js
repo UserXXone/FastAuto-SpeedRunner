@@ -378,32 +378,41 @@ async function killDragon(bot, say = () => {}, opts = {}) {
     }
     const top = fountainTop(bot) || 62;
     const L = layout(stand);
+    // Sığınak: duruş yerinde 2 blok aşağı kaz, üstünü kapat. Yer altında ejderha bizi
+    // görmüyor (ne ateş topu ne nefes); yatak 2 blok önde, yerin üstünde: patlama ile
+    // aramızda toprak var. Yerüstünde kapsül/direk denendi: kurarken ya da ok atarken
+    // görüp vurdu.
+    L.bedFoot = stand.offset(L.dir[0] * 2, 0, L.dir[1] * 2);
+    L.supports = [];
+    L.wall = [];
     say(`Duruş ${stand}, fıskiye tepesi y=${top}, yatak ${L.bedFoot}`);
     await openTube(bot, stand, L);
-    // 2 blok yüksel: nefes bulutu yerde ve 0,5 blok yüksek; üstünde kalınca dokunmaz
-    // (kaçmaya çalışırken defalarca öldük). Duvar da 4 blok: patlama bize gelmesin.
     const [wx, wz] = L.dir;
-    L.wall = [0, 1, 2, 3].map((dy) => stand.offset(wx, dy, wz));
-    // Direk yok: kapsül yerde. Kapalıyken ejderha bizi görmüyor, ne ateş topu atıyor ne
-    // nefes hücumuna geçiyor. Direğe çıkarken (~2 sn açıkta) her seferinde vurulduk.
+    for (let i = 0; i < 2; i++) {
+      const below = bot.blockAt(H.cellOf(bot).offset(0, -1, 0));
+      if (!below || below.boundingBox !== "block" || below.name === "bedrock") break;
+      try {
+        await A.withHand(bot, async () => {
+          const { item } = A.fastestTool(bot, below);
+          if (item && (!bot.heldItem || bot.heldItem.type !== item.type)) await bot.equip(item, "hand");
+          await bot.dig(below, true);
+        });
+      } catch (err) { break; }
+      for (let k = 0; k < 20 && !bot.entity.onGround; k++) await A.sleep(50);
+    }
     const perch = H.cellOf(bot);
-    A.dbg("ejderha duruşu:", perch.toString(), "yükseklik", perch.y - stand.y);
-    // Kapsül: zemin, dört yan + tavan. Ejderha görmediği oyuncuya ateş topu
-    // atmıyor ve nefes hücumuna geçmiyor (hedef seçerken görüş hattına bakıyor). Ateş
-    // topları açıktayken bizi defalarca öldürdü. Yatağı kapsülün dışına, desteğin üstüne koyup
-    // tıklarız (sunucu mesafeye bakar, görüşe değil).
+    A.dbg("ejderha sığınağı:", perch.toString(), "derinlik", stand.y - perch.y);
     const shell = [perch.offset(0, -1, 0)];
     for (const [sx, sz] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) shell.push(perch.offset(sx, 0, sz));
     for (const [sx, sz] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) shell.push(perch.offset(sx, 1, sz));
-    // Tavan yan bloklara çapraz kalıyor, tutunamaz: önce yanına bir köprü bloğu.
+    // Tavan: yanında tutunacak blok yoksa önce bir köprü bloğu (arkamızda, yatağın tersinde).
     shell.push(perch.offset(-wx, 2, -wz), perch.offset(0, 2, 0));
     bot._noFill = [perch, perch.offset(0, 1, 0)];
-    const windows = [[1, 0], [-1, 0], [0, 1], [0, -1]].map(([sx, sz]) => perch.offset(sx, 1, sz)).filter((w) => !L.wall.some((k) => k.equals(w)));
+    const windows = [];
     const reseal = async () => {
       if (shell.some((c) => (bot.blockAt(c) || {}).boundingBox !== "block")) await H.placeMany(bot, shell, 4);
     };
     await reseal();
-    await H.placeMany(bot, L.wall, 4);
     await clearBedSpot(bot, L);
     // Kristalleri döngü içinde, ejderha havadayken teker teker vururuz: kristale
     // kilitlenip inen ejderhayı kaçırıyorduk.
@@ -421,7 +430,7 @@ async function killDragon(bot, say = () => {}, opts = {}) {
       }
       // Ejderha ateş topunun mor bulutu (nefes) üstümüzdeyse kaç: içinde durunca öldük.
       // Bulut yerde: ayağımız ondan 1,5 blok yukarıdaysa (direkteyiz) dokunmaz.
-      const cloud = Object.values(bot.entities).find((e) => e.name === "area_effect_cloud" && bot.entity.position.y - e.position.y < 1.5 && e.position.distanceTo(bot.entity.position) < 6);
+      const cloud = Object.values(bot.entities).find((e) => e.name === "area_effect_cloud" && Math.abs(bot.entity.position.y - e.position.y) < 1.5 && e.position.distanceTo(bot.entity.position) < 6);
       if (cloud) {
         // Bulutun merkezi tam üstümüzdeyse "uzağı" yok: fıskiyeden dışarı doğru kaç.
         let away = bot.entity.position.minus(cloud.position);
@@ -464,7 +473,7 @@ async function killDragon(bot, say = () => {}, opts = {}) {
         const head = bot.blockAt(L.bedFoot.offset(ddx, 0, ddz));
         const fiery = [spot, head].some((x) => x && /fire$/.test(x.name));
         if (!under.every(solid) || fiery || (spot && spot.boundingBox === "block")) await clearBedSpot(bot, L);
-        let done = await headBomb(bot, d, [...shell, ...L.wall, perch, perch.offset(0, 1, 0)]);
+        let done = await headBomb(bot, d, [...shell, perch, perch.offset(0, 1, 0)]);
         if (done === null) done = await bedBomb(bot, L);
         if (done) {
           bombs++;
@@ -480,7 +489,7 @@ async function killDragon(bot, say = () => {}, opts = {}) {
         const me = bot.entity.position;
         // Ok atmak için kapsülde pencere açılıyor: sadece ejderha uzaktayken (bizi
         // görüp ateş topu atmasın). Ejderhaya ok atmıyoruz (pencere açık kalırdı).
-        const far = true; // kristaller iyileştiriyor (167→200 ölçüldü): her fırsatta vur
+        const far = false; // sığınaktan ok atılamıyor (görüş yok)
         const c = far && bow(bot) && arrows(bot) ? crystals(bot).filter((x) => !caged(bot, x) && (crystalTries.get(x.id) || 0) < 6)
           .sort((a, b) => a.position.distanceTo(me) - b.position.distanceTo(me))[0] : null;
         if (c) {
