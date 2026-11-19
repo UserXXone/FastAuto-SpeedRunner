@@ -480,7 +480,11 @@ async function huntEndermen(bot, need, say, opts = {}) {
           if (prey) A.dbg("enderman avı: sokuluyorum", prey.position.distanceTo(bot.entity.position).toFixed(1));
           bot.pathfinder.setGoal(prey ? new GoalFollow(prey, 8) : best ? new GoalNear(best.x, best.y + 1, best.z, 1) : new GoalNearXZ(gx, gz, 3), Boolean(prey));
           const tw = Date.now();
-          while (Date.now() - tw < 25000 && bot.pathfinder.isMoving()) {
+          // isMoving() yol hesaplanırken false: döngü hemen bitiyordu, bot hiç yürümüyordu.
+          await A.sleep(400);
+          while (Date.now() - tw < 25000) {
+            if (prey && bot.entities[prey.id] && prey.position.distanceTo(bot.entity.position) < 9) break;
+            if (!prey && !bot.pathfinder.isMoving() && Date.now() - tw > 3000) break;
             if (endermen(bot, 40).some((e) => (tries.get(e.id) || 0) < 2 && e.position.distanceTo(bot.entity.position) > 4 && e.position.distanceTo(bot.entity.position) < 16 && canSee(bot, e))) break;
             await A.sleep(200);
           }
