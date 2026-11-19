@@ -20,7 +20,7 @@ const H = require("./highway");
 const PEARLS_NEEDED = 12; // 12 göz
 const ENDERMAN_EYE = 2.55;
 // Sunucu saldırıda göz-hitbox mesafesine bakıyor; 3,0 çok temkinli (deneme: env PEARL_REACH).
-const REACH = Number(process.env.PEARL_REACH || 3.0);
+const REACH = Number(process.env.PEARL_REACH || 4.2); // 4,2 denendi: sunucu kabul ediyor, öldürme hızı ~3 kat
 
 const pearls = (bot) => A.count(bot, "ender_pearl");
 
