@@ -226,4 +226,19 @@ async function fillPortal(bot, room, say = () => {}) {
   return { placed, open: Boolean(mid && mid.name === "end_portal") };
 }
 
-module.exports = { _standCells: standCells, returnToOverworld, findPortalRoom, locatePortalRoom, tunnelToRoom, fillPortal, eyes };
+// Açılmış End portalına gir (halkanın ortasındaki end_portal bloklarından birine yürü/düş).
+async function enterEndPortal(bot, maxMs = 30000) {
+  const id = bot.registry.blocksByName.end_portal.id;
+  const t0 = Date.now();
+  while (bot.game.dimension !== "the_end" && Date.now() - t0 < maxMs) {
+    const p = bot.findBlock({ matching: id, maxDistance: 12 });
+    if (!p) throw new Error("End portalı görünmüyor");
+    // Portal yere gömülü değil, havada: üstüne yürüyüp içine düşeriz.
+    await H.highway(bot, p.position.offset(0, 1, 0), { maxMs: 15000 }).catch(() => {});
+    for (let i = 0; i < 40 && bot.game.dimension !== "the_end"; i++) await A.sleep(100);
+  }
+  if (bot.game.dimension !== "the_end") throw new Error("End'e girilemedi");
+  await A.sleep(3000); // platform ve chunk'lar yüklensin
+}
+
+module.exports = { enterEndPortal, _standCells: standCells, returnToOverworld, findPortalRoom, locatePortalRoom, tunnelToRoom, fillPortal, eyes };

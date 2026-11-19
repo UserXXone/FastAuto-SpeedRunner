@@ -9,9 +9,9 @@ const { Vec3 } = require("vec3");
 const A = require("./actions");
 const C = require("./combat");
 
-const FILLERS = ["netherrack", "cobblestone", "nether_bricks", "dirt", "cobbled_deepslate", "blackstone", "basalt", "soul_soil", "soul_sand"];
+const FILLERS = ["netherrack", "end_stone", "cobblestone", "nether_bricks", "dirt", "cobbled_deepslate", "blackstone", "basalt", "soul_soil", "soul_sand"];
 // Kazınca dolgu bloğu veren Nether blokları (nylium kırılınca netherrack düşer).
-const MINEABLE = new Set(["netherrack", "blackstone", "basalt", "soul_soil", "soul_sand", "crimson_nylium", "warped_nylium"]);
+const MINEABLE = new Set(["end_stone", "netherrack", "blackstone", "basalt", "soul_soil", "soul_sand", "crimson_nylium", "warped_nylium"]);
 const NEIGHBORS = [[0, -1, 0], [1, 0, 0], [-1, 0, 0], [0, 0, 1], [0, 0, -1], [0, 1, 0]];
 const UNBREAKABLE = new Set(["bedrock", "spawner", "chest", "obsidian", "crying_obsidian", "nether_portal", "end_portal_frame"]);
 

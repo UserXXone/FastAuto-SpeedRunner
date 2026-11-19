@@ -181,9 +181,11 @@ async function netherKosu(args) {
   const cast = args.basla === "dokum";
   const kaleTest = args.basla === "kale"; // doğrudan kale aşaması (12 göz verilir)
   if (kaleTest) args.hedef = "kale";
+  const endTest = args.basla === "end"; // doğrudan End: ejderha (yataklar verilir)
+  if (endTest) args.hedef = "ejderha";
   const warpedTest = args.basla === "warped"; // doğrudan enderman avı (Nether'a ışınlar)
   if (warpedTest && !["pearl", "kale"].includes(args.hedef)) args.hedef = "pearl";
-  const start = kaleTest ? "kale" : warpedTest ? "warped" : args.basla === "portal" || cast ? "portal" : "bastan";
+  const start = kaleTest ? "kale" : endTest ? "end" : warpedTest ? "warped" : args.basla === "portal" || cast ? "portal" : "bastan";
   const external = Boolean(args.host);
   if (!external && (!args.seed || args.seed === true))
     throw new Error("--seed vermelisin. Örnek: npm run nether -- --seed 123");
@@ -283,6 +285,20 @@ async function netherKosu(args) {
         await rcon.komut(`give ${username} ${it}`);
       if (cast) for (const it of ["bucket 2", "flint_and_steel"]) await rcon.komut(`give ${username} ${it}`);
       await sleep(1500);
+    }
+
+    if (endTest && rcon) {
+      console.log("TEST: End'e ışınlanıyor, yataklar veriliyor (gerçek koşu değil).");
+      for (const it of ["stone_pickaxe", "stone_pickaxe", "stone_sword", "cobblestone 192", "cooked_beef 12", "white_bed 12"])
+        await rcon.komut(`give ${username} ${it}`);
+      // Portaldan girişteki obsidyen platform (ışınlanınca oluşmuyor).
+      await rcon.komut("execute in minecraft:the_end run forceload add 96 -4 104 4");
+      await sleep(2000);
+      await rcon.komut("execute in minecraft:the_end run fill 98 48 -2 102 48 2 obsidian");
+      await rcon.komut("execute in minecraft:the_end run fill 98 49 -2 102 51 2 air");
+      await rcon.komut(`execute in minecraft:the_end run tp ${username} 100.5 49 0.5`);
+      await rcon.komut(`item replace entity ${username} armor.head with carved_pumpkin`);
+      await sleep(4000);
     }
 
     if (warpedTest && rcon) {

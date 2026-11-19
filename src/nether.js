@@ -18,6 +18,7 @@ const L = require("./lavacast");
 const E = require("./pearl");
 const R = require("./prep");
 const K = require("./stronghold");
+const D = require("./dragon");
 const { Vec3 } = require("vec3");
 const { scanLoaded } = require("./scanner");
 const { makePlan } = require("./planner");
@@ -28,7 +29,7 @@ const COBBLE_NEEDED = 32; // kazma 3 + kılıç 2 + 8 yedek kazma 24 + yedek
 const RODS_NEEDED = 6; // 12 göz için 12 toz = 6 çubuk (kalenin yeri belli, göz atmıyoruz)
 const FOOD_WANTED = 6;
 const FOOD_MIN = 3; // bundan azsa Nether'a girmeden önce hayvan ara
-const GOALS = ["nether", "blaze", "pearl", "kale"]; // koşunun nereye kadar gideceği
+const GOALS = ["nether", "blaze", "pearl", "kale", "ejderha"]; // koşunun nereye kadar gideceği
 
 // Uzak bir (x,z) noktasına parça parça yürü; ilerleme durursa bırak.
 async function travelXZ(bot, x, z, range, maxMs = 240000) {
@@ -316,6 +317,15 @@ async function stageStronghold(bot, info, timer, say, skipReturn) {
   timer.split(`End portalı açıldı (${r.placed} göz)`);
 }
 
+// Faz 4: ejderha (yatak patlatma).
+async function stageDragon(bot, timer, say) {
+  if (bot.game.dimension !== "the_end") throw new Error("End'de değiliz");
+  if (!D.beds(bot)) throw new Error("Yatak yok");
+  const r = await D.killDragon(bot, say);
+  timer.split(`EJDERHA (${r.bombs} yatak)`);
+  say(`🐉 Ejderha öldü! Süre: ${fmt(timer.elapsed())}`);
+}
+
 /**
  * info: { portal: [x, z], bastion, fortress, kale, warped }  (seed avcısı / doğrulamadan)
  * opts: { start: "bastan" | "portal" | "kale", goal: "kale" | "pearl" | "blaze" | "nether", chat, delay }
@@ -348,6 +358,11 @@ async function run(bot, info, opts = {}) {
       say(`🟣 End portalı açık. Süre: ${fmt(timer.elapsed())}`);
       return timer;
     }
+    if (opts.start === "end") {
+      // Test kısayolu: doğrudan End, ejderha.
+      await stageDragon(bot, timer, say);
+      return timer;
+    }
     if (opts.start === "warped") {
       // Test kısayolu: doğrudan enderman avı ve göz yapımı.
       await stagePearls(bot, info, timer, say, guard);
@@ -377,6 +392,11 @@ async function run(bot, info, opts = {}) {
     if (goal >= 3) {
       await stageStronghold(bot, info, timer, say, false);
       say(`🟣 End portalı açık. Süre: ${fmt(timer.elapsed())}`);
+    }
+    if (goal >= 4) {
+      await K.enterEndPortal(bot);
+      timer.split("END'e giriş");
+      await stageDragon(bot, timer, say);
     }
   } finally {
     guard.stop();
