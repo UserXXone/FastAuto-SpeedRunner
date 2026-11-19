@@ -12,7 +12,7 @@
 //   4. Ejderha ölene kadar tekrarla.
 
 const { Vec3 } = require("vec3");
-const { goals: { GoalNearXZ } } = require("mineflayer-pathfinder");
+const { goals: { GoalNearXZ, GoalNear } } = require("mineflayer-pathfinder");
 const A = require("./actions");
 const C = require("./combat");
 const H = require("./highway");
@@ -47,7 +47,8 @@ function perched(bot, top) {
   const d = dragon(bot);
   if (!d) return false;
   const p = d.position;
-  return Math.hypot(p.x, p.z) < 4 && p.y < top + 4;
+  // İnince gövde tam ortada durmuyor (ölçüldü: (2, 64, 5) gibi; kafası bize dönük).
+  return Math.hypot(p.x, p.z) < 8 && p.y < top + 6;
 }
 
 /**
@@ -259,6 +260,19 @@ async function killDragon(bot, say = () => {}, opts = {}) {
       if (Date.now() - lastLog > 5000) {
         lastLog = Date.now();
         A.dbg(`ejderha: ${d ? `${d.position.x.toFixed(0)},${d.position.y.toFixed(0)},${d.position.z.toFixed(0)}` : "yok"} can ${bot.health.toFixed(0)} yatak ${beds(bot)} patlama ${bombs}`);
+      }
+      // Ejderha ateş topunun mor bulutu (nefes) üstümüzdeyse kaç: içinde durunca öldük.
+      const cloud = Object.values(bot.entities).find((e) => e.name === "area_effect_cloud" && e.position.distanceTo(bot.entity.position) < 4.5);
+      if (cloud) {
+        const away = bot.entity.position.minus(cloud.position);
+        const n = Math.hypot(away.x, away.z) || 1;
+        const tx = Math.round(bot.entity.position.x + (away.x / n) * 6);
+        const tz = Math.round(bot.entity.position.z + (away.z / n) * 6);
+        A.dbg("nefes bulutu: kaçıyorum", tx, tz);
+        await A.goto(bot, new GoalNearXZ(tx, tz, 1), 5000);
+        for (let i = 0; i < 40 && bot.entities[cloud.id] && cloud.position.distanceTo(stand) < 4.5; i++) await A.sleep(250);
+        await A.goto(bot, new GoalNear(stand.x, stand.y, stand.z, 0), 8000);
+        continue;
       }
       if (d && perched(bot, top)) {
         // İniş ~50 sn: art arda patlat (duvarı sadece yıkıldıysa onar). Yavaş kalınca
