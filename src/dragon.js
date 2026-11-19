@@ -370,6 +370,8 @@ async function killDragon(bot, say = () => {}, opts = {}) {
     // Kristaller ejderhayı iyileştiriyor (yataklar 200→140 indirdi, uçarken 200'e döndü):
     // tünele girmeden giriş platformundan okla vur.
     if (bow(bot) && arrows(bot)) {
+      for (let i = 0; i < 40 && !crystals(bot).length; i++) await A.sleep(250); // varlıklar yüklensin
+      A.dbg("görünen kristal:", crystals(bot).length, crystals(bot).map((c) => c.position.distanceTo(bot.entity.position).toFixed(0)).join(" "));
       const k = await shootCrystals(bot, say, opts.crystalMs || 120000);
       say(`Kristaller (platformdan): ${k.broken} patladı, ${k.left} kaldı`);
     }
