@@ -111,6 +111,12 @@ async function clearBedSpot(bot, L) {
   const cells = [L.bedFoot, L.bedFoot.offset(dx, 0, dz), L.bedFoot.offset(0, 1, 0), L.bedFoot.offset(dx, 1, dz)];
   for (const c of cells) {
     const b = bot.blockAt(c);
+    // Patlama ateş bırakıyor: ateşli hücreye ne yatak ne blok koyulur (sunucu 5 sn cevap
+    // vermiyordu, bot bekliyor gibi duruyordu). Ateşi vurarak söndür.
+    if (b && (b.name === "fire" || b.name === "soul_fire")) {
+      try { await bot.dig(b, true); } catch (err) { /* */ }
+      continue;
+    }
     if (b && b.boundingBox === "block" && b.name !== "bedrock") {
       try {
         await A.withHand(bot, async () => {
@@ -318,7 +324,9 @@ async function killDragon(bot, say = () => {}, opts = {}) {
         const [ddx, ddz] = L.dir;
         const under = [L.bedFoot.offset(0, -1, 0), L.bedFoot.offset(ddx, -1, ddz)];
         const spot = bot.blockAt(L.bedFoot);
-        if (!under.every(solid) || (spot && spot.boundingBox === "block")) await clearBedSpot(bot, L);
+        const head = bot.blockAt(L.bedFoot.offset(ddx, 0, ddz));
+        const fiery = [spot, head].some((x) => x && /fire$/.test(x.name));
+        if (!under.every(solid) || fiery || (spot && spot.boundingBox === "block")) await clearBedSpot(bot, L);
         if (await bedBomb(bot, L)) {
           bombs++;
           say(`  yatak patladı (${bombs}), ejderha ${d.position.y.toFixed(0)}`);
