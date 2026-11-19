@@ -420,8 +420,54 @@ async function killDragon(bot, say = () => {}, opts = {}) {
     shell.push(perch.offset(-wx, 2, -wz), perch.offset(0, 2, 0));
     bot._noFill = [perch, perch.offset(0, 1, 0)];
     const windows = [];
+    let up = false; // sığınaktan yüzeye çıktık mı (ejderha bizi görsün diye)
+    let upAt = 0;
     const reseal = async () => {
+      if (up) return;
       if (shell.some((c) => (bot.blockAt(c) || {}).boundingBox !== "block")) await H.placeMany(bot, shell, 4);
+    };
+    const digCell = async (c) => {
+      const b = bot.blockAt(c);
+      if (!b || b.boundingBox !== "block" || b.name === "bedrock") return;
+      try {
+        await A.withHand(bot, async () => {
+          const { item } = A.fastestTool(bot, b);
+          if (item && (!bot.heldItem || bot.heldItem.type !== item.type)) await bot.equip(item, "hand");
+          await bot.dig(b, true);
+        });
+      } catch (err) { /* */ }
+    };
+    // Yüzeye çık: tavanı kaz, iki blok yüksel. Ejderha görmediği oyuncu için fıskiyede
+    // ancak 5 sn oturuyor; görünce ~30-50 sn oturup nefes atıyor (yatak zamanı).
+    // Yüzeydeyken yatak yanda (1 önde, 2 yanda), patlama ile aramızda yan duvar; fıskiyeye
+    // bakan taraf açık kalır (ejderha bizi görsün).
+    const [px, pz] = [-wz, wx];
+    const top2 = perch.offset(0, 2, 0); // yüzeyde ayaklarımızın hücresi
+    const Lup = { dir: [wx, wz], bedFoot: top2.offset(wx + 2 * px, 0, wz + 2 * pz), supports: [] };
+    const sideWall = [top2.offset(px, 0, pz), top2.offset(px, 1, pz), top2.offset(wx + px, 1, wz + pz)];
+    const popUp = async () => {
+      bot._noFill = null;
+      await digCell(perch.offset(0, 2, 0));
+      for (let i = 0; i < 3 && H.cellOf(bot).y < perch.y + 2; i++) await H.pillarUp(bot);
+      up = H.cellOf(bot).y >= perch.y + 2;
+      upAt = Date.now();
+      if (up) {
+        bot._noFill = [H.cellOf(bot), H.cellOf(bot).offset(0, 1, 0)];
+        await H.placeMany(bot, sideWall, 3);
+        await clearBedSpot(bot, Lup);
+      }
+      A.dbg("yüzeye çıktım:", up, H.cellOf(bot).toString(), "yatak", Lup.bedFoot.toString());
+    };
+    // Sığınağa in: altımızdaki iki bloğu kaz, tavanı kapat.
+    const dropDown = async (why) => {
+      A.dbg("sığınağa iniyorum:", why);
+      for (let i = 0; i < 3 && H.cellOf(bot).y > perch.y; i++) {
+        await digCell(H.cellOf(bot).offset(0, -1, 0));
+        for (let k = 0; k < 20 && !bot.entity.onGround; k++) await A.sleep(50);
+      }
+      up = false;
+      bot._noFill = [perch, perch.offset(0, 1, 0)];
+      await H.placeMany(bot, shell, 4);
     };
     await reseal();
     await clearBedSpot(bot, L);
@@ -445,6 +491,7 @@ async function killDragon(bot, say = () => {}, opts = {}) {
       // kaçmaya kalkınca dışarı çıkıp öldük.
       const hurtRecently = Date.now() - (bot._dragonHurtAt || 0) < 1500;
       const cloud = hurtRecently && Object.values(bot.entities).find((e) => e.name === "area_effect_cloud" && e.position.distanceTo(bot.entity.position) < 8);
+      if (up && (hurtRecently || cloud)) { await dropDown("vuruldum"); continue; }
       if (cloud) {
         // Bulutun merkezi tam üstümüzdeyse "uzağı" yok: fıskiyeden dışarı doğru kaç.
         let away = bot.entity.position.minus(cloud.position);
@@ -475,6 +522,10 @@ async function killDragon(bot, say = () => {}, opts = {}) {
         for (let i = 0; i < 2 && H.cellOf(bot).y < perch.y; i++) if (!(await H.pillarUp(bot))) break;
         continue;
       }
+      // İniyor mu? Fıskiyeye yakın ve alçakta: yüzeye çık ki bizi görüp otursun.
+      const landing = d && Math.hypot(d.position.x, d.position.z) < 14 && d.position.y < top + 12;
+      if (!up && landing && Date.now() - upAt > 3000) { await popUp(); continue; }
+      if (up && !landing && Date.now() - upAt > 6000) { await dropDown("ejderha kalktı"); continue; }
       if (d && perched(bot, top)) {
         // İniş ~50 sn: art arda patlat (duvarı sadece yıkıldıysa onar). Yavaş kalınca
         // (tur başına 5 sn) ejderha kafasıyla bizi öldürdü.
@@ -487,8 +538,16 @@ async function killDragon(bot, say = () => {}, opts = {}) {
         const head = bot.blockAt(L.bedFoot.offset(ddx, 0, ddz));
         const fiery = [spot, head].some((x) => x && /fire$/.test(x.name));
         if (!under.every(solid) || fiery || (spot && spot.boundingBox === "block")) await clearBedSpot(bot, L);
-        let done = await headBomb(bot, d, [...shell, perch, perch.offset(0, 1, 0)]);
-        if (done === null) done = await bedBomb(bot, L);
+        let done;
+        if (up) {
+          if (!sideWall.every(solid)) await H.placeMany(bot, sideWall, 2);
+          const ub = bot.blockAt(Lup.bedFoot);
+          const uu = bot.blockAt(Lup.bedFoot.offset(0, -1, 0));
+          if (!solid(uu) || (ub && (ub.boundingBox === "block" || /fire$/.test(ub.name)))) await clearBedSpot(bot, Lup);
+          done = await bedBomb(bot, Lup);
+        } else {
+          done = await bedBomb(bot, L);
+        }
         if (done) {
           bombs++;
           await A.sleep(150);
