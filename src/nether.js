@@ -318,10 +318,17 @@ async function stageStronghold(bot, info, timer, say, skipReturn) {
 }
 
 // Faz 4: ejderha (yatak patlatma).
-async function stageDragon(bot, timer, say) {
+async function stageDragon(bot, timer, say, guard) {
   if (bot.game.dimension !== "the_end") throw new Error("End'de değiliz");
   if (!D.beds(bot)) throw new Error("Yatak yok");
-  const r = await D.killDragon(bot, say);
+  // Koruma kapalı: yemek yerken eldeki eşyayı değiştirip kazmayı yarıda kesiyordu.
+  if (guard) guard.pause();
+  let r;
+  try {
+    r = await D.killDragon(bot, say);
+  } finally {
+    if (guard) guard.resume();
+  }
   timer.split(`EJDERHA (${r.bombs} yatak)`);
   say(`🐉 Ejderha öldü! Süre: ${fmt(timer.elapsed())}`);
   if (await D.enterExitPortal(bot, say)) {
@@ -364,7 +371,7 @@ async function run(bot, info, opts = {}) {
     }
     if (opts.start === "end") {
       // Test kısayolu: doğrudan End, ejderha.
-      await stageDragon(bot, timer, say);
+      await stageDragon(bot, timer, say, guard);
       return timer;
     }
     if (opts.start === "warped") {
@@ -400,7 +407,7 @@ async function run(bot, info, opts = {}) {
     if (goal >= 4) {
       await K.enterEndPortal(bot);
       timer.split("END'e giriş");
-      await stageDragon(bot, timer, say);
+      await stageDragon(bot, timer, say, guard);
     }
   } finally {
     guard.stop();

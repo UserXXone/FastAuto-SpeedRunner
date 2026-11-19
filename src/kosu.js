@@ -299,7 +299,7 @@ async function netherKosu(args) {
 
     if (endTest && rcon) {
       console.log("TEST: End'e ışınlanıyor, yataklar veriliyor (gerçek koşu değil).");
-      for (const it of ["stone_pickaxe", "stone_pickaxe", "stone_sword", "cobblestone 192", "cooked_beef 16", "white_bed 16", "bow", "arrow 64"])
+      for (const it of ["stone_pickaxe", "stone_pickaxe", "stone_sword", "cobblestone 128", "netherrack 128", "cooked_beef 16", "white_bed 16", "bow", "arrow 64"])
         await rcon.komut(`give ${username} ${it}`);
       // Portaldan girişteki obsidyen platform (ışınlanınca oluşmuyor).
       await rcon.komut("execute in minecraft:the_end run forceload add 96 -4 104 4");

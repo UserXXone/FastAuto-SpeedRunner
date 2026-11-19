@@ -16,6 +16,14 @@ const NEIGHBORS = [[0, -1, 0], [1, 0, 0], [-1, 0, 0], [0, 0, 1], [0, 0, -1], [0,
 const UNBREAKABLE = new Set(["bedrock", "spawner", "chest", "obsidian", "crying_obsidian", "nether_portal", "end_portal_frame"]);
 
 const isFiller = (i) => FILLERS.includes(i.name);
+// En kolay kazılan dolgu önce (netherrack < kırıktaş < End taşı): geri kazmak gerekince
+// End taşı yavaş ve kazma yarıda kesilince takılıyorduk.
+const FILLER_ORDER = ["netherrack", "dirt", "soul_soil", "soul_sand", "cobblestone", "cobbled_deepslate", "blackstone", "basalt", "nether_bricks", "end_stone"];
+function pickFiller(bot) {
+  const items = bot.inventory.items().filter(isFiller);
+  items.sort((a, b) => FILLER_ORDER.indexOf(a.name) - FILLER_ORDER.indexOf(b.name));
+  return items[0];
+}
 const isSolid = (b) => Boolean(b && b.boundingBox === "block");
 const isLava = (b) => Boolean(b && b.name === "lava");
 // Su da kapatılır: tünel su dolarsa bot boğuluyor (yeraltı gölleri).
@@ -40,7 +48,7 @@ async function placeFiller(bot, cell, depth = 0) {
       if (!isSolid(ref) || ref.name === "spawner" || ref.name === "chest") continue;
       try {
         await A.withHand(bot, async () => {
-          const item = bot.inventory.items().find(isFiller);
+          const item = pickFiller(bot);
           if (!item) throw new Error("dolgu bloğu kalmadı");
           if (!bot.heldItem || bot.heldItem.type !== item.type) await bot.equip(item, "hand");
           await bot.placeBlock(ref, new Vec3(-d[0], -d[1], -d[2]));
@@ -102,7 +110,7 @@ async function placeMany(bot, cells, passes = 2) {
     if (!todo.length) return;
     const jobs = [];
     await A.withHand(bot, async () => {
-      const item = bot.inventory.items().find(isFiller);
+      const item = pickFiller(bot);
       if (!item) return;
       if (!bot.heldItem || bot.heldItem.type !== item.type) await bot.equip(item, "hand");
       for (const c of todo) {
@@ -275,7 +283,7 @@ async function pillarUp(bot) {
     }
     bot.setControlState("forward", false);
     await A.withHand(bot, async () => {
-      const item = bot.inventory.items().find(isFiller);
+      const item = pickFiller(bot);
       if (!item) return;
       if (!bot.heldItem || bot.heldItem.type !== item.type) await bot.equip(item, "hand");
       await bot.lookAt(base.offset(0.5, -0.5, 0.5), true);
