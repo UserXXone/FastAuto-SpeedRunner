@@ -358,7 +358,21 @@ async function killDragon(bot, say = () => {}, opts = {}) {
   bot.on("bossBarCreated", onBar);
   bot.on("entityDead", onDead);
   try {
-    const stand = await reachCenter(bot, opts.dist || 9, say);
+    let stand = await reachCenter(bot, opts.dist || 9, say);
+    // Yolda atılan ateş topunun bulutu tam duracağımız yere düşmüş olabilir (vardığımız
+    // an hasar alıp öldük): bulutsuz bir yön seç (fıskiyenin 4 yanından biri).
+    const cloudAt = (p, r) => Object.values(bot.entities).some((e) => e.name === "area_effect_cloud" && Math.hypot(e.position.x - p.x - 0.5, e.position.z - p.z - 0.5) < r);
+    for (let k = 0; k < 4 && cloudAt(stand, 8); k++) {
+      const dist = opts.dist || 9;
+      const alts = [[dist, 0], [0, dist], [-dist, 0], [0, -dist]]
+        .map(([x, z]) => { const gy = groundAt(bot, x, z); return gy == null ? null : new Vec3(x, gy + 1, z); })
+        .filter((p) => p && !cloudAt(p, 8))
+        .sort((a, b) => a.distanceTo(bot.entity.position) - b.distanceTo(bot.entity.position));
+      if (!alts.length) { await A.sleep(1000); continue; }
+      A.dbg("duruş yerinde bulut: başka yana geçiyorum", alts[0].toString());
+      await A.goto(bot, new GoalNear(alts[0].x, alts[0].y, alts[0].z, 0), 20000);
+      stand = H.cellOf(bot);
+    }
     const top = fountainTop(bot) || 62;
     const L = layout(stand);
     say(`Duruş ${stand}, fıskiye tepesi y=${top}, yatak ${L.bedFoot}`);
