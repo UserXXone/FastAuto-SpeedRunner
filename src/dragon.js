@@ -289,6 +289,9 @@ async function shoot(bot, target, height = 0.5, opts = {}) {
     const hit = bot.world.raycast(s0.eye, s0.dir, 4, (bl) => bl && bl.boundingBox === "block");
     if (!hit) break;
     if (["bedrock", "obsidian", "end_portal_frame"].includes(hit.name) || keep.some((k) => k.equals(hit.position))) return false;
+    // Sadece izin verilen pencereler (kapsülün yan, göz hizası): tavanı açınca ejderha
+    // bizi görüp ateş topu attı.
+    if (opts.windows && !opts.windows.some((w) => w.equals(hit.position))) return false;
     A.dbg("ok yolu kapalı, pencere:", hit.name, hit.position.toString());
     try {
       await A.withHand(bot, async () => {
@@ -395,6 +398,7 @@ async function killDragon(bot, say = () => {}, opts = {}) {
     // Tavan yan bloklara çapraz kalıyor, tutunamaz: önce yanına bir köprü bloğu.
     shell.push(perch.offset(-wx, 2, -wz), perch.offset(0, 2, 0));
     bot._noFill = [perch, perch.offset(0, 1, 0)];
+    const windows = [[1, 0], [-1, 0], [0, 1], [0, -1]].map(([sx, sz]) => perch.offset(sx, 1, sz)).filter((w) => !L.wall.some((k) => k.equals(w)));
     const reseal = async () => {
       if (shell.some((c) => (bot.blockAt(c) || {}).boundingBox !== "block")) await H.placeMany(bot, shell, 4);
     };
@@ -438,7 +442,7 @@ async function killDragon(bot, say = () => {}, opts = {}) {
           const dd = dragon(bot);
           if (c) {
             crystalTries.set(c.id, (crystalTries.get(c.id) || 0) + 1);
-            await shoot(bot, c, 1.0);
+            await shoot(bot, c, 1.0, { keep: L.wall, windows });
             await A.sleep(400);
             if (!bot.entities[c.id]) { crystalsBroken++; say(`  kristal patladı (${crystalsBroken}), ${crystals(bot).length} kaldı`); }
           } else if (dd && bow(bot) && arrows(bot) > 16 && dd.position.distanceTo(me) < 40) await shoot(bot, dd, 1.5);
@@ -481,8 +485,9 @@ async function killDragon(bot, say = () => {}, opts = {}) {
           .sort((a, b) => a.position.distanceTo(me) - b.position.distanceTo(me))[0] : null;
         if (c) {
           crystalTries.set(c.id, (crystalTries.get(c.id) || 0) + 1);
-          await shoot(bot, c, 1.0, { keep: L.wall });
-          await A.sleep(400);
+          await shoot(bot, c, 1.0, { keep: L.wall, windows });
+          await reseal();
+          await A.sleep(300);
           if (!bot.entities[c.id]) { crystalsBroken++; say(`  kristal patladı (${crystalsBroken}), ${crystals(bot).length} kaldı`); }
         } else await A.sleep(200);
       }
