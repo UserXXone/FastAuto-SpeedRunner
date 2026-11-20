@@ -238,8 +238,10 @@ async function stagePearls(bot, info, timer, say, guard) {
   if (info.seed) {
     try { const fs=require("fs"), p=`kosu/rota/${info.seed}.json`; if(fs.existsSync(p)) need=B.neededEyes(JSON.parse(fs.readFileSync(p,"utf8")).overworld?.portalOdasi?.takiliGoz||0); } catch (_) {}
   }
-  if (info.bastion && Math.hypot(info.bastion[0]-bot.entity.position.x,info.bastion[1]-bot.entity.position.z)<250) {
-    const bastion = {x:info.bastion[0],z:info.bastion[1]};
+  // Takas bastion'da DEĞİL, bulunduğumuz Nether çölünde: ölçüldü, portal/fortress çevresinde 5-6 piglin
+  // var ama brute/hoglin yok; bastion'da 3 brute bizi iki kez öldürdü. TAKAS=0 ile kapatılır.
+  if (process.env.TAKAS !== "0") {
+    const bastion = null;
     let nuggets=A.count(bot,"gold_nugget");
     if(nuggets<9){nuggets=await B.mineGold(bot,Math.max(18,need*36),say,{bastion,maxMs:420000});timer.split(`Altın (${Math.floor(nuggets/9)} külçe)`);}
     if(nuggets>=9){const tb=await A.ensureTable(bot); // masa verilmezse 3x3 tarif yapılamıyordu
