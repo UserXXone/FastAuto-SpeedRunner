@@ -290,6 +290,12 @@ async function netherKosu(args) {
       // Gerçek koşuda demir zırh Overworld'de yapılacak (sonraki iş); testte veriliyor.
       if (args.zirh) for (const [slot, it] of [["chest", "iron_chestplate"], ["legs", "iron_leggings"], ["feet", "iron_boots"]])
         await rcon.komut(`item replace entity ${username} armor.${slot} with ${it}`);
+      // Şov kiti (SOV=1): elmas zırh (kafada balkabağı kalır), elmas kazma, altın elma.
+      if (process.env.SOV) {
+        for (const [slot, it] of [["chest", "diamond_chestplate"], ["legs", "diamond_leggings"], ["feet", "diamond_boots"]])
+          await rcon.komut(`item replace entity ${username} armor.${slot} with ${it}`);
+        for (const it of ["diamond_pickaxe", "diamond_pickaxe", "diamond_sword", "golden_apple 8"]) await rcon.komut(`give ${username} ${it}`);
+      }
       // Kristaller dururken ejderha nadiren iniyor (15 dk'da hiç inmedi). Yatak
       // patlatmayı ölçmek için testte kristaller kaldırılabilir: --kristal-yok
       if (args["kristal-yok"]) {
