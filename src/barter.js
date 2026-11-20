@@ -515,8 +515,10 @@ async function recoverTradeHealth(bot, deadline) {
 }
 
 async function collectTradePearl(bot) {
+  const gold = drops(bot, "gold_ingot");
   const pearl = drops(bot, "ender_pearl")
     .filter(e => e.position.distanceTo(bot.entity.position) <= 6)
+    .filter(e => gold.every(g => e.position.distanceTo(g.position) >= 1.5))
     .sort((a, b) => a.position.distanceTo(bot.entity.position) - b.position.distanceTo(bot.entity.position))[0];
   if (!pearl || tradeDanger(bot)) return false;
   A.dbg("Takas: pearl yürüyüşü", pearl.id, pearl.position.toString(), H.cellOf(bot).toString());
@@ -538,7 +540,7 @@ async function approachOpenTradePiglin(bot, piglin) {
   return result && near;
 }
 
-async function throwTradeGold(bot, piglin) {
+async function throwTradeGold(bot, piglin, waitMode = false) {
   const p = bot.entities[piglin.id] || piglin;
   const item = bot.inventory.items().find(i => i.name === "gold_ingot");
   if (!p || !item) return null;
@@ -549,7 +551,7 @@ async function throwTradeGold(bot, piglin) {
   let dx = p.position.x - me.x, dz = p.position.z - me.z;
   const flat = Math.hypot(dx, dz) || 1;
   dx /= flat; dz /= flat;
-  const aim = new Vec3(me.x + dx * 2, me.y + 1.5, me.z + dz * 2);
+  const aim = new Vec3(me.x + dx * 2, me.y + (waitMode ? 0.2 : 1.5), me.z + dz * 2);
   await bot.lookAt(aim, true);
   const before = A.count(bot, "gold_ingot");
   const beforeDrops = new Set(drops(bot, "gold_ingot").map(e => e.id));
@@ -571,6 +573,37 @@ async function throwTradeGold(bot, piglin) {
     drop ? `drop=${drop.id}@${drop.position.toString()}` : "drop=?");
   if (after >= before && !drop) return null;
   return { id: drop?.id ?? null, piglin: piglin.id, at: Date.now(), position: drop?.position?.clone?.() || aim };
+}
+
+function waitTradePiglins(bot, thrown, failed, attempts) {
+  const me = bot.entity.position;
+  const eye = me.offset(0, bot.entity.eyeHeight || 1.62, 0);
+  return Object.values(bot.entities)
+    // Aynı piglin tekrar takas yapabilir: kalıcı yasak yok, son atıştan 20 sn sonra yine aday.
+    .filter(p => p.name === "piglin" && !p.isBaby && !(Date.now() - (thrown.get(p.id) || 0) < 20000) &&
+      !attempts.some(a => a.piglin === p.id) && p.position)
+    .filter(p => flatDistance(p.position, me) <= 9 && Math.abs(p.position.y - me.y) <= 2)
+    .filter(p => {
+      if (!bot.world?.raycast) return false;
+      const to = p.position.offset(0, (p.height || 1.8) * 0.85, 0);
+      const d = to.minus(eye), len = d.norm();
+      return len > 0 && !bot.world.raycast(eye, d.scaled(1 / len), len,
+        b => b && b.boundingBox === "block");
+    })
+    .sort((a, b) => a.position.distanceTo(me) - b.position.distanceTo(me));
+}
+
+async function approachWaitTradePiglin(bot, piglin) {
+  const p = bot.entities[piglin.id] || piglin;
+  if (!p?.position) return false;
+  const me = bot.entity.position;
+  const dx = p.position.x - me.x, dz = p.position.z - me.z;
+  const d = Math.hypot(dx, dz) || 1, len = Math.min(16, d);
+  const dest = { x: me.x + dx / d * len, z: me.z + dz / d * len };
+  A.dbg("Takas: bekle kısa yaklaşım", `piglin=${p.id}`, `mesafe=${d.toFixed(1)}`);
+  try { await A.goto(bot, new GoalNearXZ(Math.round(dest.x), Math.round(dest.z), 3), 15000); }
+  catch (err) { A.dbg("Takas: bekle kısa yaklaşım hatası", err.message); return false; }
+  return true;
 }
 
 async function retreatAfterTrade(bot, piglin) {
@@ -605,18 +638,24 @@ function updateTradeAttempts(bot, attempts, failed, onTaken = () => {}) {
 
 async function barter(bot, needPearls, say = () => {}, opts = {}) {
   const t0=Date.now(), maxMs=opts.maxMs||360000, target=opts.tradeTarget || opts.bastion;
-  // Kazma bütün netherrack'i yedi: kapalı yol 'no-blocks' deyip 3 dk boşa döndü. Önce blok topla.
-  if (A.count(bot, H.isFiller) < 32) { const b0 = A.count(bot, H.isFiller); await H.mineTunnel(bot, 64, 50); A.dbg("Takas: blok toplandı", b0, "→", A.count(bot, H.isFiller)); }
-  const travelMs = Math.min(180000, Math.max(1000, maxMs - (Date.now() - t0)));
-  // bastion null olabilir: bu durumda da doğrudan çevre piglinlerini bulup
-  // yaklaş; aksi halde ana döngü hedefsiz biçimde yalnızca uyuyordu.
-  if (!(await reachPiglins(bot, target, travelMs))) {
-    return {pearls:E.pearls(bot),ingotsUsed:0,ms:Date.now()-t0};
+  const mode = opts.mode || process.env.TAKAS_MOD || "bekle";
+  const waitMode = mode !== "git";
+  if (!waitMode) {
+    // Kazma bütün netherrack'i yedi: kapalı yol 'no-blocks' deyip 3 dk boşa döndü. Önce blok topla.
+    if (A.count(bot, H.isFiller) < 32) { const b0 = A.count(bot, H.isFiller); await H.mineTunnel(bot, 64, 50); A.dbg("Takas: blok toplandı", b0, "→", A.count(bot, H.isFiller)); }
+    const travelMs = Math.min(180000, Math.max(1000, maxMs - (Date.now() - t0)));
+    // bastion null olabilir: bu durumda da doğrudan çevre piglinlerini bulup yaklaş.
+    if (!(await reachPiglins(bot, target, travelMs))) {
+      return {pearls:E.pearls(bot),ingotsUsed:0,ms:Date.now()-t0};
+    }
   }
   const deadline=t0+maxMs, start=A.count(bot,"gold_ingot");
-  const attempts=[], failed=new Set();
+  const attempts=[], failed=new Set(), thrown=new Map();
+  let waitFallbackUsed=false;
   let lastPiglin=Date.now(), last=Date.now(), lastAccepted=0;
-  const hasNearbyPearl=()=>drops(bot,"ender_pearl").some(e=>e.position.distanceTo(bot.entity.position)<=6);
+  const hasNearbyPearl=()=>drops(bot,"ender_pearl")
+    .filter(e=>e.position.distanceTo(bot.entity.position)<=6)
+    .some(e=>drops(bot,"gold_ingot").every(g=>e.position.distanceTo(g.position)>=1.5));
   const accepted=()=>{lastAccepted=Date.now();};
   const logTradeStatus=()=>{
     if (Date.now()-last<10000) return;
@@ -642,11 +681,22 @@ async function barter(bot, needPearls, say = () => {}, opts = {}) {
     await collectTradePearl(bot);
     if (E.pearls(bot)>=needPearls) break;
 
-    let candidates=walkableTradePiglins(bot).filter(p =>
+    let candidates=waitMode ? waitTradePiglins(bot, thrown, failed, attempts) : walkableTradePiglins(bot).filter(p =>
       !failed.has(p.id) && !attempts.some(a=>a.piglin===p.id));
     if (candidates.length) lastPiglin=Date.now();
     if (!candidates.length) {
-      if (Date.now()-lastPiglin>=15000) {
+      if (waitMode && Date.now()-lastPiglin>=90000) {
+        const visible = visibleTradePiglins(bot).filter(p => !p.isBaby && p.position)
+          .sort((a,b) => a.position.distanceTo(bot.entity.position)-b.position.distanceTo(bot.entity.position));
+        if (visible.length) await approachWaitTradePiglin(bot, visible[0]);
+        else if (!waitFallbackUsed) {
+          waitFallbackUsed=true;
+          await reachPiglins(bot, target, Math.min(60000, Math.max(1000, deadline-Date.now())));
+        }
+        lastPiglin=Date.now();
+        continue;
+      }
+      if (!waitMode && Date.now()-lastPiglin>=15000) {
         A.dbg(target ? "Takas: 15 sn uygun piglin yok, yeniden yaklaşıyorum" : "Takas: 15 sn piglin yok, çevreyi yeniden arıyorum", H.cellOf(bot).toString());
         const retryMs=Math.min(60000,Math.max(1000,deadline-Date.now()));
         if (!(await reachPiglins(bot,target,retryMs))) break;
@@ -661,21 +711,25 @@ async function barter(bot, needPearls, say = () => {}, opts = {}) {
       if (bot.health<10 && !(await recoverTradeHealth(bot, deadline))) break;
       const dangerNow=tradeDanger(bot);
       if (dangerNow) { await retreatTrade(bot,dangerNow); break; }
-      candidates=walkableTradePiglins(bot).filter(p =>
+      candidates=waitMode ? waitTradePiglins(bot, thrown, failed, attempts) : walkableTradePiglins(bot).filter(p =>
         !failed.has(p.id) && !attempts.some(a=>a.piglin===p.id));
       const p=candidates[0];
       if (!p) break;
-      if (!(await approachOpenTradePiglin(bot,p))) {
+      if (!waitMode && !(await approachOpenTradePiglin(bot,p))) {
         failed.add(p.id);
         A.dbg("Takas: pigline yaklaşamadım, tekrar denemiyorum", `piglin=${p.id}`);
         continue;
       }
       const current=bot.entities[p.id]||p;
-      if (tradeDanger(bot) || !current.position || current.position.distanceTo(bot.entity.position)>3.5) continue;
-      const attempt=await throwTradeGold(bot,current);
+      if (tradeDanger(bot) || !current.position || (!waitMode && current.position.distanceTo(bot.entity.position)>3.5)) continue;
+      const dist=flatDistance(current.position,bot.entity.position), dy=current.position.y-bot.entity.position.y;
+      const attempt=await throwTradeGold(bot,current,waitMode);
       if (!attempt) { failed.add(p.id); continue; }
       attempts.push(attempt);
-      await retreatAfterTrade(bot,current);
+      if (waitMode) {
+        thrown.set(p.id, Date.now());
+        A.dbg("Takas: bekle atış", `piglin=${p.id}`, `mesafe=${dist.toFixed(1)}`, `dy=${dy.toFixed(1)}`, `külçe=${A.count(bot,"gold_ingot")}`);
+      } else await retreatAfterTrade(bot,current);
     }
 
     updateTradeAttempts(bot, attempts, failed, accepted);
