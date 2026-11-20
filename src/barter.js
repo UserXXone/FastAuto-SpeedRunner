@@ -443,7 +443,9 @@ async function barter(bot, needPearls, say = () => {}, opts = {}) {
       if(p){
         const wall=await openWindow(bot,p.position);
         const stillNear=piglinsNear(bot,4).find(e=>e.id===p.id);
-        const ground=stillNear && groundOpenBetween(bot,stillNear);
+        // Zemin şartı çok katıydı (bastionda piglinler hep 1-5 blok farklı yükseklikte: hiç atış yapılmadı).
+        // Yeter ki 3 blok yükseklik farkı içinde olsun; piglin altını aşağıya inip alabilir.
+        const ground=stillNear && Math.abs(stillNear.position.y-bot.entity.position.y)<=3;
         if(wall && stillNear && ground) {
           await bot.lookAt(p.position.offset(0,1,0),true);
           const item=bot.inventory.items().find(i=>i.name==="gold_ingot");
