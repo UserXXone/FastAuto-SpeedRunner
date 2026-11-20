@@ -57,28 +57,118 @@ function logPiglins(bot, piglins) {
   A.dbg("Takas turu piglinleri:", list.length ? list.join(" | ") : "yok");
 }
 
+function visiblePiglinCluster(bot) {
+  const me = bot.entity.position;
+  const visible = Object.values(bot.entities)
+    .filter(e => e.name === "piglin" && e.position && e.position.distanceTo(me) <= 96);
+  return visible.map(p => {
+    const neighbors = visible.filter(q => q.position.distanceTo(p.position) <= 10);
+    return {
+      piglin: p,
+      count: neighbors.length,
+      distance: p.position.distanceTo(me),
+    };
+  }).sort((a, b) => b.count - a.count || a.distance - b.distance)[0] || null;
+}
+
+function logPiglinTarget(bot, kind, target, cluster = null) {
+  const p = cluster?.piglin;
+  A.dbg("Takas: piglin yeni hedef", kind,
+    `piglin=${p ? p.id : "yok"}`,
+    cluster ? `küme=${cluster.count}` : "küme=?",
+    `hedef=${Math.round(target.x)},${Math.round(target.y)},${Math.round(target.z)}`,
+    `bot=${H.cellOf(bot).toString()}`);
+}
+
 async function reachPiglins(bot, target, maxMs) {
-  let result = "not-started";
-  try {
-    result = await H.longHaul(bot, { x: target.x, z: target.z }, {
-      // Bastion merkezine girmiyoruz: yol, ilk iki normal piglin 14 blok içine
-      // girince kesilir; 20 blok da merkezden güvenli bir son yaklaşma payıdır.
-      range: 20,
-      maxMs,
-      until: () => piglinsNear(bot, 14).length >= 2,
-    });
-  } catch (err) {
-    A.dbg("Takas: piglin yolunda hata", err.message);
-    return false;
+  const deadline = Date.now() + maxMs;
+  const nearEnough = () => piglinsNear(bot, 12).length >= 2;
+  const remaining = () => Math.max(1000, deadline - Date.now());
+  let fallbackRetryAt = 0;
+
+  while (Date.now() < deadline) {
+    if (nearEnough()) {
+      A.dbg("Takas: piglin bölgesine varıldı", "until", H.cellOf(bot).toString());
+      return true;
+    }
+
+    const cluster = visiblePiglinCluster(bot);
+    if (cluster) {
+      fallbackRetryAt = 0;
+      const p = cluster.piglin.position;
+      const piglinY = Math.round(p.y);
+      const dest = { x: Math.round(p.x), y: piglinY, z: Math.round(p.z) };
+      logPiglinTarget(bot, "görünen küme", dest, cluster);
+      let result;
+      try {
+        // longHaul hedefe son 30 blok kala dönsün; yükseklik aralığı piglinin
+        // seviyesini zorlar, planLevel yine o aralıkta en ucuz katı seçer.
+        result = await H.longHaul(bot, { x: dest.x, z: dest.z }, {
+          range: 30,
+          minY: Math.max(20, piglinY - 3),
+          maxY: piglinY + 3,
+          maxMs: Math.min(30000, remaining()),
+          until: nearEnough,
+        });
+        A.dbg("Takas: piglin uzun yolu", result, `hedefY=${piglinY}`, H.cellOf(bot).toString());
+        if (nearEnough()) return true;
+
+        // longHaul y'yi seçse de hedefe yaklaşınca piglinin gerçek katına
+        // inmek gerekir; range 10 içinde iki piglin varsa until keser.
+        const d = Math.hypot(dest.x - H.cellOf(bot).x, dest.z - H.cellOf(bot).z);
+        if (d <= 30 && Date.now() < deadline) {
+          result = await H.highway(bot, dest, {
+            enclosed: true,
+            range: 10,
+            maxMs: Math.min(30000, remaining()),
+            until: nearEnough,
+          });
+          A.dbg("Takas: piglin son yaklaşım", result, `hedefY=${piglinY}`, H.cellOf(bot).toString());
+        }
+      } catch (err) {
+        A.dbg("Takas: piglin yolunda hata", err.message);
+      }
+      if (nearEnough()) {
+        A.dbg("Takas: piglin bölgesine varıldı", "until", H.cellOf(bot).toString());
+        return true;
+      }
+      // Bir küme görüldü ama 12 blok içinde iki piglin yoksa, yeni entity
+      // güncellemelerini bekleyip yeniden küme seç.
+      await A.sleep(Math.min(500, remaining()));
+      continue;
+    }
+
+    // Entity henüz görünmüyorsa yapının içine, bastion merkezi yüksekliğine
+    // yaklaş. En fazla 20 saniyelik bu dilimde entity'leri yeniden kontrol et;
+    // görünür oldukları anda bir sonraki turda piglin kümesine geçilir.
+    if (Date.now() < fallbackRetryAt) {
+      await A.sleep(Math.min(500, remaining()));
+      continue;
+    }
+    const fallback = { x: target.x, y: 60, z: target.z };
+    logPiglinTarget(bot, "piglin görünmüyor, bastion taraması", fallback);
+    let result = "not-started";
+    try {
+      result = await H.longHaul(bot, { x: target.x, z: target.z }, {
+        range: 0,
+        minY: 56,
+        maxY: 64,
+        maxMs: Math.min(20000, remaining()),
+        until: nearEnough,
+      });
+    } catch (err) {
+      A.dbg("Takas: bastion tarama yolunda hata", err.message);
+    }
+    A.dbg("Takas: bastion tarama sonucu", result, H.cellOf(bot).toString());
+    fallbackRetryAt = Date.now() + 20000;
+    if (nearEnough()) return true;
+    await A.sleep(Math.min(500, remaining()));
   }
-  const piglins = piglinsNear(bot, 14);
-  if (piglins.length < 2) {
-    A.dbg("Takas: piglin bölgesine varılamadı", result,
-      `konum=${H.cellOf(bot).toString()}`, `yakın=${piglins.length}`, "pearl 0");
-    return false;
-  }
-  A.dbg("Takas: piglin bölgesine varıldı", result, H.cellOf(bot).toString());
-  return true;
+
+  const piglins = piglinsNear(bot, 12);
+  A.dbg("Takas: piglin bölgesine varılamadı", "timeout",
+    `konum=${H.cellOf(bot).toString()}`, `yakın=${piglins.length}`, "pearl 0");
+  return false;
 }
 
 function windowCell(bot, target) {
