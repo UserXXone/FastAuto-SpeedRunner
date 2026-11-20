@@ -447,7 +447,9 @@ async function barter(bot, needPearls, say = () => {}, opts = {}) {
         // Yeter ki 3 blok yükseklik farkı içinde olsun; piglin altını aşağıya inip alabilir.
         const ground=stillNear && Math.abs(stillNear.position.y-bot.entity.position.y)<=3;
         if(wall && stillNear && ground) {
-          await bot.lookAt(p.position.offset(0,1,0),true);
+          // Yukarı doğru at: dibimize düşen külçeyi 2 sn sonra kendimiz geri topluyorduk (ölçüldü: 78 atış, 0 takas).
+          { const e=bot.entity.position.offset(0,1.62,0); const v=p.position.minus(bot.entity.position); const n=Math.hypot(v.x,v.z)||1;
+            await bot.lookAt(e.offset(v.x/n*3,1.6,v.z/n*3),true); }
           const item=bot.inventory.items().find(i=>i.name==="gold_ingot");
           if(item){
             const before=A.count(bot,"gold_ingot");
