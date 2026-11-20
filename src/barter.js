@@ -206,6 +206,9 @@ async function mineGold(bot, wantNuggets, say = () => {}, opts = {}) {
     const ores = bot.findBlocks({ matching: id, maxDistance: 48, count: 128 })
       .map(p => new Vec3(p.x, p.y, p.z)).filter(p => ![[0,0,0],[1,0,0],[-1,0,0],[0,1,0],[0,-1,0],[0,0,1],[0,0,-1]].some(([x,y,z]) => bot.blockAt(p.offset(x,y,z))?.name === "lava"))
       .filter(p => !opts.bastion || flatDistance(p, opts.bastion) <= 80)
+      // Piglin görürken altın cevheri kazınca piglinler (altın botla bile) saldırıyor (öldük):
+      // 18 blok içinde piglin/brute olan cevheri alma.
+      .filter(p => !Object.values(bot.entities).some(e => /^piglin/.test(e.name || "") && e.position.distanceTo(p) < 18))
       .filter(p => p.distanceTo(bot.entity.position) <= GOLD_ORE_RANGE)
       .filter(p => !tried.has(p.toString()))
       .sort((a,b) => {
