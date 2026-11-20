@@ -485,6 +485,8 @@ function updateTradeAttempts(bot, attempts, failed, onTaken = () => {}) {
 
 async function barter(bot, needPearls, say = () => {}, opts = {}) {
   const t0=Date.now(), maxMs=opts.maxMs||360000, target=opts.bastion;
+  // Kazma bütün netherrack'i yedi: kapalı yol 'no-blocks' deyip 3 dk boşa döndü. Önce blok topla.
+  if (A.count(bot, H.isFiller) < 32) { const b0 = A.count(bot, H.isFiller); await H.mineTunnel(bot, 64, 50); A.dbg("Takas: blok toplandı", b0, "→", A.count(bot, H.isFiller)); }
   const travelMs = Math.min(180000, Math.max(1000, maxMs - (Date.now() - t0)));
   // bastion null olabilir: bu durumda da doğrudan çevre piglinlerini bulup
   // yaklaş; aksi halde ana döngü hedefsiz biçimde yalnızca uyuyordu.
