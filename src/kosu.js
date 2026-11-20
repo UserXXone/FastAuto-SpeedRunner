@@ -339,7 +339,7 @@ async function netherKosu(args) {
     if (bastionTest && rcon) {
       console.log("TEST: Nether bastion çevresine ışınlanıyor.");
       for (const it of ["stone_pickaxe", "stone_pickaxe", "stone_pickaxe", "stone_sword", "netherrack 128", "cooked_beef 12", "crafting_table", "blaze_rod 6"]) await rcon.komut(`give ${username} ${it}`);
-      await rcon.komut(`execute in minecraft:the_nether run spreadplayers 40 -70 0 6 under 100 false ${username}`);
+      await rcon.komut(`execute in minecraft:the_nether run spreadplayers 40 -70 0 6 under 72 false ${username}`);
       await sleep(4000);
     }
 
