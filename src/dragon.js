@@ -811,6 +811,8 @@ async function killDragonBowl(bot, say = () => {}, opts = {}) {
         await A.sleep(60);
         continue;
       }
+      // Nefes bulutu büyü hasarı: zırh kesmiyor, iki kez öldük. Can düşünce altın elma (emilim + yenilenme).
+      if (bot.health < 13 && A.count(bot, "golden_apple") > 0) { say(`  altın elma (can ${bot.health.toFixed(0)})`); await C.eat(bot, { golden: true }); continue; }
       if ((bot.food < 18 || (bot.health < 16 && bot.food < 20)) && C.bestFood(bot)) await C.eat(bot);
       await A.sleep(150);
     }
