@@ -110,7 +110,69 @@ async function reachPiglins(bot, target, maxMs) {
   const remaining = () => Math.max(1000, deadline - Date.now());
   let fallbackRetryAt = 0;
 
+  // longHaul'ın planladığı 40 blokluk parçalar yüksekten piglin katına
+  // inerken tek bir tıkanmada dakikalarca bekleyebiliyor. Kısa, kapalı
+  // parçalarla ilerle; y farkı büyükse her parça aynı anda bir merdiven basamağı
+  // indirir ve son parça doğrudan targetY'ye varır.
+  const shortTradeHighway = async (targetXZ, targetY, budget) => {
+    const end = Date.now() + budget;
+    let last = H.cellOf(bot);
+    for (let i = 0; i < 24 && Date.now() < end; i++) {
+      const cur = H.cellOf(bot);
+      const rx = targetXZ.x - cur.x, rz = targetXZ.z - cur.z;
+      const flat = Math.hypot(rx, rz);
+      const yGap = targetY - cur.y;
+      // Son birkaç blokta açık zemin yaklaşımına geçeceğiz; aksi halde 8
+      // blokluk minimum merdiven adımı hedefi aşıp ileri-geri salınabilir.
+      if (flat <= 8 && Math.abs(yGap) <= 8) return "arrived";
+
+      const wanted = Math.max(8, Math.min(24, Math.max(flat, Math.abs(yGap))));
+      const len = Math.max(1, wanted);
+      const n = flat || 1;
+      let x = Math.round(cur.x + (flat ? rx / n : 1) * len);
+      let z = Math.round(cur.z + (flat ? rz / n : 0) * len);
+      if (x === cur.x && z === cur.z) x++;
+      const dy = Math.sign(yGap) * Math.min(Math.abs(yGap), Math.floor(len));
+      const dest = { x, y: cur.y + dy, z };
+      const threat = tradeDanger(bot);
+      if (threat) {
+        await retreatTrade(bot, threat);
+        return "threat";
+      }
+      A.dbg("Takas: kısa güvenli yol", `hedef=${dest.x},${dest.y},${dest.z}`, `targetY=${targetY}`, H.cellOf(bot).toString());
+      let result;
+      try {
+        result = await H.highway(bot, dest, {
+          enclosed: true,
+          descendEarly: true,
+          range: 0,
+          maxMs: Math.min(15000, Math.max(1000, end - Date.now())),
+          onTick: async () => {
+            const danger = tradeDanger(bot);
+            if (danger) throw new Error(`trade-threat:${danger.name}`);
+          },
+        });
+      } catch (err) {
+        A.dbg("Takas: kısa güvenli yol hatası", err.message, H.cellOf(bot).toString());
+        const danger = tradeDanger(bot);
+        if (danger) await retreatTrade(bot, danger);
+        return danger ? "threat" : "error";
+      }
+      A.dbg("Takas: kısa güvenli yol sonucu", result, `targetY=${targetY}`, H.cellOf(bot).toString());
+      if (result !== "arrived" && result !== "until") return result;
+      const now = H.cellOf(bot);
+      if (now.equals(last)) return "blocked";
+      last = now;
+    }
+    return "timeout";
+  };
+
   while (Date.now() < deadline) {
+    const threat = tradeDanger(bot);
+    if (threat) {
+      await retreatTrade(bot, threat);
+      continue;
+    }
     if (nearEnough() && await ensureTradeRange(bot, Math.min(30000, remaining()))) {
       A.dbg("Takas: piglin bölgesine varıldı", "until", H.cellOf(bot).toString());
       return true;
@@ -125,20 +187,16 @@ async function reachPiglins(bot, target, maxMs) {
       logPiglinTarget(bot, "görünen küme", dest, cluster);
       let result;
       try {
-        // longHaul hedefe son 30 blok kala dönsün; yükseklik aralığı piglinin
-        // seviyesini zorlar, planLevel yine o aralıkta en ucuz katı seçer.
-        result = await H.longHaul(bot, { x: dest.x, z: dest.z }, {
-          range: 30,
-          minY: Math.max(20, piglinY - 3),
-          maxY: piglinY + 3,
-          maxMs: Math.min(30000, remaining()),
-          until: nearEnough,
-        });
-        A.dbg("Takas: piglin uzun yolu", result, `hedefY=${piglinY}`, H.cellOf(bot).toString());
+        const cur = H.cellOf(bot);
+        if (cur.y >= piglinY + 8) {
+          A.dbg("Takas: piglin seviyesine erken iniyorum", `şimdiY=${cur.y}`, `hedefY=${piglinY}`, H.cellOf(bot).toString());
+        }
+        result = await shortTradeHighway({ x: dest.x, z: dest.z }, piglinY, Math.min(60000, remaining()));
+        A.dbg("Takas: piglin kısa yolu", result, `hedefY=${piglinY}`, H.cellOf(bot).toString());
         if (nearEnough() && await ensureTradeRange(bot, Math.min(30000, remaining()))) return true;
 
-        // longHaul y'yi seçse de hedefe yaklaşınca piglinin gerçek katına
-        // inmek gerekir; son yaklaşım açık zeminde pathfinder ile yapılır.
+        // Otoyol son hücreye güvenli tünelle geldikten sonra açık zemindeki
+        // son birkaç bloğu pathfinder'a bırak; piglinin gerçek katına inmişizdir.
         const d = Math.hypot(dest.x - H.cellOf(bot).x, dest.z - H.cellOf(bot).z);
         if (d <= 30 && Date.now() < deadline) {
           result = await A.goto(bot, new GoalNear(dest.x, dest.y, dest.z, 3), Math.min(15000, remaining()));
@@ -168,13 +226,7 @@ async function reachPiglins(bot, target, maxMs) {
     logPiglinTarget(bot, "piglin görünmüyor, bastion taraması", fallback);
     let result = "not-started";
     try {
-      result = await H.longHaul(bot, { x: target.x, z: target.z }, {
-        range: 0,
-        minY: 56,
-        maxY: 64,
-        maxMs: Math.min(20000, remaining()),
-        until: nearEnough,
-      });
+      result = await shortTradeHighway({ x: target.x, z: target.z }, fallback.y, Math.min(20000, remaining()));
       if (!nearEnough() && Math.hypot(target.x - H.cellOf(bot).x, target.z - H.cellOf(bot).z) <= 30 && Date.now() < deadline) {
         result = await A.goto(bot, new GoalNear(fallback.x, fallback.y, fallback.z, 10), Math.min(15000, remaining()));
       }
@@ -198,6 +250,7 @@ async function mineGold(bot, wantNuggets, say = () => {}, opts = {}) {
   const maxWalk = opts.maxWalk ?? GOLD_WALK_LIMIT;
   const tried = new Set();
   const end = Date.now() + (opts.maxMs || 240000), id = bot.registry.blocksByName.nether_gold_ore.id;
+  const targetY = opts.targetY ?? 70;
   while (Date.now() < end && walked < maxWalk && A.count(bot, "gold_nugget") < wantNuggets) {
     if (bot.health != null && bot.health <= 0) {
       A.dbg("altın: bot öldü, kazıyı durdur", H.cellOf(bot).toString(), "nugget", A.count(bot, "gold_nugget"));
@@ -206,6 +259,7 @@ async function mineGold(bot, wantNuggets, say = () => {}, opts = {}) {
     const ores = bot.findBlocks({ matching: id, maxDistance: 48, count: 128 })
       .map(p => new Vec3(p.x, p.y, p.z)).filter(p => ![[0,0,0],[1,0,0],[-1,0,0],[0,1,0],[0,-1,0],[0,0,1],[0,0,-1]].some(([x,y,z]) => bot.blockAt(p.offset(x,y,z))?.name === "lava"))
       .filter(p => !opts.bastion || flatDistance(p, opts.bastion) <= 80)
+      .filter(p => Math.abs(p.y - bot.entity.position.y) <= 12 && Math.abs(p.y - targetY) <= 12)
       // Piglin görürken altın cevheri kazınca piglinler (altın botla bile) saldırıyor (öldük):
       // 18 blok içinde piglin/brute olan cevheri alma.
       .filter(p => !Object.values(bot.entities).some(e => /^piglin/.test(e.name || "") && e.position.distanceTo(p) < 18))
@@ -250,6 +304,7 @@ async function mineGold(bot, wantNuggets, say = () => {}, opts = {}) {
     await A.sleep(500); await A.collectDrops(bot, bot.entity.position, 4);
     A.dbg("altın: cevher", ore.toString(), "bot", H.cellOf(bot).toString(), "highway=kazıldı", "nugget", A.count(bot, "gold_nugget"));
   }
+  A.dbg("altın: kazma bitti", `bot=${H.cellOf(bot).toString()}`, `konum=${bot.entity.position.toString()}`, "nugget", A.count(bot, "gold_nugget"));
   return A.count(bot,"gold_nugget");
 }
 
@@ -269,8 +324,10 @@ function walkableTradePiglins(bot, range = 48) {
 
 function tradeDanger(bot) {
   const me = bot.entity.position;
+  const ranged = new Set(["skeleton", "wither_skeleton"]);
+  const melee = new Set(["piglin_brute", "hoglin"]);
   return Object.values(bot.entities)
-    .filter(e => ["piglin_brute", "hoglin"].includes(e.name) && e.position.distanceTo(me) <= 12)
+    .filter(e => e.position && (melee.has(e.name) ? e.position.distanceTo(me) <= 12 : ranged.has(e.name) && e.position.distanceTo(me) <= 8))
     .sort((a, b) => a.position.distanceTo(me) - b.position.distanceTo(me))[0] || null;
 }
 
