@@ -245,13 +245,14 @@ async function stagePearls(bot, info, timer, say, guard) {
     // yok. Bastion koordinatına gitmek yerine bu güvenli ticaret alanını hedefle.
     const tradeTarget = { x: 22, z: 13 };
     let nuggets=A.count(bot,"gold_nugget");
-    if(nuggets<9){nuggets=await B.mineGold(bot,Math.max(18,need*36),say,{maxMs:420000});timer.split(`Altın (${Math.floor(nuggets/9)} külçe)`);}
+    if(nuggets<9&&A.count(bot,"gold_ingot")<9){nuggets=await B.mineGold(bot,Math.max(18,need*36),say,{maxMs:420000});timer.split(`Altın (${Math.floor(nuggets/9)} külçe)`);}
     if(nuggets>=9){const tb=await A.ensureTable(bot); // masa verilmezse 3x3 tarif yapılamıyordu
       // Tek seferde 13 kez craft istenince 1 tane yapıp kalıyordu (parçacıklar iki yığında): tek tek.
       for(let k=0;k<20&&A.count(bot,"gold_nugget")>=9;k++){const b0=A.count(bot,"gold_ingot");try{await A.craft(bot,"gold_ingot",1,tb);}catch(e){A.dbg("külçe craft:",e.message);}if(A.count(bot,"gold_ingot")<=b0)break;}
-      A.dbg("külçe:",A.count(bot,"gold_ingot"),"parçacık kaldı:",A.count(bot,"gold_nugget"));}
-    if(A.count(bot,"gold_ingot")>=4 && !C.wearsGold(bot)){await A.craft(bot,"golden_boots",1,await A.ensureTable(bot));const boots=bot.inventory.items().find(i=>i.name==="golden_boots");if(boots)await bot.equip(boots,"feet");}
-    if(A.count(bot,"gold_ingot")) {const res=await B.barter(bot,need,say,{tradeTarget});timer.split(`Takas (${res.pearls} pearl)`);need=Math.max(0,need-res.pearls);}
+      A.dbg("külçe:",A.count(bot,"gold_ingot"),"parçacık kaldı:",A.count(bot,"gold_nugget"));
+      if(!(A.count(bot,"gold_ingot")>=4 && !C.wearsGold(bot))) await A.pickUpTable(bot,tb);}
+    if(A.count(bot,"gold_ingot")>=4 && !C.wearsGold(bot)){await A.craft(bot,"golden_boots",1,await A.ensureTable(bot));const boots=bot.inventory.items().find(i=>i.name==="golden_boots");if(boots)await bot.equip(boots,"feet");await A.pickUpTable(bot,bot.findBlock({matching:bot.registry.blocksByName.crafting_table.id,maxDistance:5}));}
+    if(A.count(bot,"gold_ingot")) {const res=await B.barter(bot,need,say,{tradeTarget,fortress:info.fortress});timer.split(`Takas (${res.pearls} pearl)`);need=Math.max(0,need-res.pearls);}
   }
   // Takas yettiyse avı atla ama gözleri yine yap.
   if (need <= 0) {

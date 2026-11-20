@@ -441,6 +441,37 @@ async function ensureSticks(bot, needed) {
   }
 }
 
+// Nether'da odun yok: kullandığımız masayı geri kaz, sonra yine lazım (kazma/külçe craft).
+async function pickUpTable(bot, table) {
+  try {
+    const b = table && bot.blockAt(table.position);
+    if (!b || b.name !== "crafting_table") return;
+    const before = count(bot, "crafting_table");
+    await bot.dig(b, true);
+    const t0 = Date.now();
+    while (count(bot, "crafting_table") <= before && Date.now() - t0 < 2500) {
+      const drop = Object.values(bot.entities).find((e) => e.name === "item" && e.position.distanceTo(b.position) < 3);
+      if (drop) await goto(bot, new GoalNear(drop.position.x, drop.position.y, drop.position.z, 0), 2000).catch(() => {});
+      await sleep(150);
+    }
+    dbg("masa geri alındı:", count(bot, "crafting_table"));
+  } catch (err) { dbg("masa geri alma:", err.message); }
+}
+
+// Kazma bitince (Nether'da 3 taş kazma ~390 blokta bitiyordu) taş/blackstone + çubukla yenisini yap.
+async function ensurePickaxe(bot) {
+  if (bot.inventory.items().some((i) => i.name.endsWith("_pickaxe"))) return true;
+  const stone = ["cobblestone", "blackstone", "cobbled_deepslate"].find((n) => count(bot, n) >= 3);
+  if (!stone || count(bot, "stick") < 2) { dbg("kazma yok, yapamıyorum: taş", stone || "yok", "çubuk", count(bot, "stick")); return false; }
+  try {
+    const table = await ensureTable(bot);
+    await craft(bot, "stone_pickaxe", 1, table);
+    dbg("yeni taş kazma yapıldı (" + stone + ")");
+    await pickUpTable(bot, table);
+    return true;
+  } catch (err) { dbg("kazma craft:", err.message); return false; }
+}
+
 function isAirLike(b) {
   return b && b.boundingBox === "empty" && !["lava", "water"].includes(b.name);
 }
@@ -571,6 +602,8 @@ module.exports = {
   dbg,
   withHand,
   safeDigTime,
+  ensurePickaxe,
+  pickUpTable,
   approach,
   sleep,
   itemId,

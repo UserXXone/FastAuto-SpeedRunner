@@ -372,6 +372,11 @@ async function mineGold(bot, wantNuggets, say = () => {}, opts = {}) {
       A.dbg("altın: bot öldü, kazıyı durdur", H.cellOf(bot).toString(), "nugget", A.count(bot, "gold_nugget"));
       break;
     }
+    // Elle kazılan nether altın cevheri hiçbir şey düşürmüyor; son kazmayı da kale için sakla.
+    if (bot.inventory.items().filter(i => i.name.endsWith("_pickaxe")).length <= 1) {
+      A.dbg("altın: son kazma kaldı, kazıyı bırakıyorum", "nugget", A.count(bot, "gold_nugget"));
+      break;
+    }
     const danger = goldDanger(bot);
     if (danger) {
       A.dbg("altın: düşmandan kaçıyorum", danger.name, H.cellOf(bot).toString());
@@ -478,9 +483,24 @@ function tradeDanger(bot) {
     .filter(e => e.position && (
       melee.has(e.name) ? e.position.distanceTo(me) <= 12 :
       ranged.has(e.name) ? e.position.distanceTo(me) <= 8 :
-      e.name === "blaze" ? e.position.distanceTo(me) <= 12 :
-      e.name === "ghast" && e.position.distanceTo(me) <= 24))
-    .sort((a, b) => a.position.distanceTo(me) - b.position.distanceTo(me))[0] || null;
+      // Blaze görüyorsa 20 blokta kaç. Ghast'tan kaçmak işe yaramıyor (64 bloktan atıyor, kaçarken piglinlerden uzaklaşıp parkur yapıyordu).
+      e.name === "blaze" && e.position.distanceTo(me) <= 20 && seesFrom(bot, e)))
+    .sort((a, b) => a.position.distanceTo(me) - b.position.distanceTo(me))[0] || fireNear(bot);
+}
+function seesFrom(bot, e) {
+  if (!bot.world?.raycast) return true;
+  const eye = bot.entity.position.offset(0, 1.62, 0), to = e.position.offset(0, (e.height || 1.8) * 0.8, 0);
+  const d = to.minus(eye), len = d.norm();
+  return !len || !bot.world.raycast(eye, d.scaled(1 / len), len, b => b && b.boundingBox === "block");
+}
+// Yanımızda ateş (blaze topu yaktı) varsa oradan uzaklaş.
+function fireNear(bot) {
+  const me = bot.entity.position.floored();
+  for (let x = -1; x <= 1; x++) for (let y = -1; y <= 1; y++) for (let z = -1; z <= 1; z++) {
+    const b = bot.blockAt(me.offset(x, y, z));
+    if (b && (b.name === "fire" || b.name === "soul_fire")) return { name: "ateş", position: b.position.offset(0.5, 0, 0.5) };
+  }
+  return null;
 }
 
 async function retreatTrade(bot, danger) {
@@ -575,12 +595,14 @@ async function throwTradeGold(bot, piglin, waitMode = false) {
   return { id: drop?.id ?? null, piglin: piglin.id, at: Date.now(), position: drop?.position?.clone?.() || aim };
 }
 
+// Bebek piglin altını alıp hiçbir şey vermiyor. 1.21 metadata: 17 = bebek.
+const isBabyPiglin = p => p.isBaby || p.metadata?.[17] === true;
 function waitTradePiglins(bot, thrown, failed, attempts) {
   const me = bot.entity.position;
   const eye = me.offset(0, bot.entity.eyeHeight || 1.62, 0);
   return Object.values(bot.entities)
     // Aynı piglin tekrar takas yapabilir: kalıcı yasak yok, son atıştan 20 sn sonra yine aday.
-    .filter(p => p.name === "piglin" && !p.isBaby && !(Date.now() - (thrown.get(p.id) || 0) < 20000) &&
+    .filter(p => p.name === "piglin" && !isBabyPiglin(p) && !(Date.now() - (thrown.get(p.id) || 0) < 20000) &&
       !attempts.some(a => a.piglin === p.id) && p.position)
     .filter(p => flatDistance(p.position, me) <= 9 && Math.abs(p.position.y - me.y) <= 2)
     .filter(p => {
@@ -649,6 +671,15 @@ async function barter(bot, needPearls, say = () => {}, opts = {}) {
       return {pearls:E.pearls(bot),ingotsUsed:0,ms:Date.now()-t0};
     }
   }
+  // Fortress dibinde iskelet/blaze/ghast öldürdü: takası en az 64 blok uzakta yap.
+  const fort = opts.fortress && { x: opts.fortress[0], z: opts.fortress[1] };
+  const fortDist = p => fort ? flatDistance(p, fort) : Infinity;
+  if (waitMode && fortDist(bot.entity.position) < 64) {
+    const me = bot.entity.position, d = fortDist(me) || 1;
+    const away = { x: Math.round(fort.x + (me.x - fort.x) / d * 80), z: Math.round(fort.z + (me.z - fort.z) / d * 80) };
+    A.dbg("Takas: fortress'ten uzaklaşıyorum", `mesafe=${d.toFixed(0)}`, `hedef=${away.x},${away.z}`);
+    try { await A.goto(bot, new GoalNearXZ(away.x, away.z, 4), 60000); } catch (err) { A.dbg("Takas: fortress'ten uzaklaşma hatası", err.message); }
+  }
   const deadline=t0+maxMs, start=A.count(bot,"gold_ingot");
   const attempts=[], failed=new Set(), thrown=new Map();
   let waitFallbackUsed=false;
@@ -673,6 +704,12 @@ async function barter(bot, needPearls, say = () => {}, opts = {}) {
     updateTradeAttempts(bot, attempts, failed, accepted);
 
     const danger=tradeDanger(bot);
+    if (danger && /skeleton/.test(danger.name) && danger.position.distanceTo(bot.entity.position) <= 10) {
+      // Kaçış yolu bulamayınca yerinde durup ok yiyerek öldü: iskelete kılıçla git.
+      A.dbg("Takas: iskelete saldırıyorum", danger.name);
+      try { await C.killEntity(bot, danger, 15000); } catch (err) { A.dbg("Takas: iskelet dövüşü hatası", err.message); }
+      continue;
+    }
     if (danger) {
       await retreatTrade(bot,danger);
       lastPiglin=Date.now();
@@ -685,13 +722,13 @@ async function barter(bot, needPearls, say = () => {}, opts = {}) {
       !failed.has(p.id) && !attempts.some(a=>a.piglin===p.id));
     if (candidates.length) lastPiglin=Date.now();
     if (!candidates.length) {
-      if (waitMode && Date.now()-lastPiglin>=90000) {
-        const visible = visibleTradePiglins(bot).filter(p => !p.isBaby && p.position)
+      if (waitMode && Date.now()-lastPiglin>=15000) {
+        const visible = visibleTradePiglins(bot).filter(p => !isBabyPiglin(p) && p.position && fortDist(p.position) >= 48)
           .sort((a,b) => a.position.distanceTo(bot.entity.position)-b.position.distanceTo(bot.entity.position));
         if (visible.length) await approachWaitTradePiglin(bot, visible[0]);
         else if (!waitFallbackUsed) {
           waitFallbackUsed=true;
-          await reachPiglins(bot, target, Math.min(60000, Math.max(1000, deadline-Date.now())));
+          await reachPiglins(bot, null, Math.min(60000, Math.max(1000, deadline-Date.now())));
         }
         lastPiglin=Date.now();
         continue;

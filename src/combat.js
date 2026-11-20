@@ -192,6 +192,16 @@ async function eatNow(bot, item) {
  * Arka planda çalışan koruma: menzile giren düşmana vurur, acıkınca yer.
  * Yol bulucu çalışırken de açık kalır. Dönen: { stop, pause, resume, stats }.
  */
+// Kritik vuruş: zıpla, düşerken vur (+%50 hasar). Yerde değilsek/suda/lavdaysak normal vur.
+async function critJump(bot) {
+  if (process.env.KRITIK === "0" || !bot.entity.onGround || bot.entity.isInWater || bot.entity.isInLava) return;
+  bot.setControlState("jump", true);
+  await A.sleep(60);
+  bot.setControlState("jump", false);
+  const t0 = Date.now();
+  while (Date.now() - t0 < 450 && !(bot.entity.velocity.y < -0.05 && !bot.entity.onGround)) await A.sleep(20);
+}
+
 function startGuard(bot, opts = {}) {
   const say = opts.say || (() => {});
   const stats = { hits: 0, kills: 0, eaten: 0 };
@@ -204,6 +214,20 @@ function startGuard(bot, opts = {}) {
     if (paused || busy || !bot.entity || bot.health <= 0 || bot.inLavaEscape) return;
     busy = true;
     try {
+      // 0) Gönderene iade: ghast topu yaklaşınca ghast'a bakıp vur (top bakılan yöne geri gider).
+      const ball = Object.values(bot.entities).find((e) => e.name === "fireball" && e.position.distanceTo(eyeOf(bot)) <= 3.4);
+      if (ball && Date.now() - lastAttack >= 150) {
+        const ghast = Object.values(bot.entities).filter((e) => e.name === "ghast")
+          .sort((a, b) => a.position.distanceTo(ball.position) - b.position.distanceTo(ball.position))[0];
+        await A.withHand(bot, async () => {
+          if (ghast) await bot.lookAt(ghast.position.offset(0, 2, 0), true).catch(() => {});
+          else await bot.lookAt(ball.position, true).catch(() => {});
+          bot.attack(ball);
+        });
+        A.dbg("🔥 ghast topu geri yollandı", ghast ? `ghast@${ghast.position.distanceTo(bot.entity.position).toFixed(0)}` : "ghast görünmüyor");
+        lastAttack = Date.now();
+        return;
+      }
       // 1) Düşman menzilde mi?
       const target = hostilesNear(bot, 6).find((e) => reachDistance(bot, e) <= 3.0);
       if (target) {
@@ -215,6 +239,7 @@ function startGuard(bot, opts = {}) {
             else {
           // İzleyen/yayın için: vurduğumuz yere bak (sunucu için gerekmez).
           await bot.lookAt(target.position.offset(0, (target.height || 1) * 0.6, 0), true).catch(() => {});
+          await critJump(bot);
           bot.attack(target);
         }
           });
@@ -296,6 +321,9 @@ async function killEntity(bot, target, maxMs = 15000) {
         if (Date.now() - lastAttack >= SWORD_COOLDOWN) {
           await bot.lookAt(target.position.offset(0, (target.height || 1) * 0.6, 0), true);
           await equipWeapon(bot);
+          await critJump(bot);
+          if (!bot.entities[target.id]) break;
+          await bot.lookAt(target.position.offset(0, (target.height || 1) * 0.6, 0), true);
           bot.attack(target);
           lastAttack = Date.now();
         }

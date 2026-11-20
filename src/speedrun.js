@@ -429,6 +429,8 @@ async function run(bot, opts = {}) {
   await A.ensureSticks(bot, 2);
   table = await A.ensureTable(bot);
   await A.craft(bot, "iron_pickaxe", 1, table);
+  // Nether'da kazma bitiyor: yedek taş kazmalar için 6 çubuk taşı (A.ensurePickaxe).
+  try { await A.ensureSticks(bot, 6); } catch (err) { A.dbg("yedek çubuk:", err.message); }
   for (const n of ["diamond_ore", "deepslate_diamond_ore"]) {
     bot.pathfinder.movements.blocksCantBreak.delete(
       bot.registry.blocksByName[n].id,

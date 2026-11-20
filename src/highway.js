@@ -527,6 +527,7 @@ async function longHaul(bot, dest, opts = {}) {
   const maxMs = opts.maxMs || 600000;
   const range = opts.range || 6;
   for (;;) {
+    await A.ensurePickaxe(bot);
     const cur = cellOf(bot);
     const d = Math.hypot(dest.x - cur.x, dest.z - cur.z);
     if (d <= range) return "arrived";
