@@ -678,7 +678,7 @@ async function barter(bot, needPearls, say = () => {}, opts = {}) {
     const me = bot.entity.position, d = fortDist(me) || 1;
     const away = { x: Math.round(fort.x + (me.x - fort.x) / d * 80), z: Math.round(fort.z + (me.z - fort.z) / d * 80) };
     A.dbg("Takas: fortress'ten uzaklaşıyorum", `mesafe=${d.toFixed(0)}`, `hedef=${away.x},${away.z}`);
-    try { A.dbg("Takas: uzaklaşma", await H.longHaul(bot, away, { maxMs: 120000, range: 6 })); } // pathfinder fortress duvarlarında 60 sn takılıyordu catch (err) { A.dbg("Takas: fortress'ten uzaklaşma hatası", err.message); }
+    try { A.dbg("Takas: uzaklaşma", await H.longHaul(bot, away, { maxMs: 120000, range: 6 })); } /* pathfinder fortress duvarında takılıyordu */ catch (err) { A.dbg("Takas: fortress'ten uzaklaşma hatası", err.message); }
   }
   const deadline=t0+maxMs, start=A.count(bot,"gold_ingot");
   const attempts=[], failed=new Set(), thrown=new Map();
