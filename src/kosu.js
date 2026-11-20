@@ -270,7 +270,7 @@ async function netherKosu(args) {
       console.log("TEST: portala ışınlanıyor, aletler veriliyor (gerçek koşu değil).");
       const [x, z] = info.portal;
       await rcon.komut(`spreadplayers ${x} ${z} 0 4 false ${username}`);
-      for (const it of ["stone_pickaxe", "stone_pickaxe", "stone_pickaxe", "stone_pickaxe", "stick 6", "stone_sword", "oak_log 4", "cobblestone 12", "shield", "cooked_beef 12", "golden_boots"])
+      for (const it of ["stone_pickaxe", "iron_pickaxe", "stone_pickaxe", "stone_pickaxe", "stick 6", "stone_sword", "oak_log 4", "cobblestone 12", "shield", "cooked_beef 12", "golden_boots"])
         await rcon.komut(`give ${username} ${it}`);
       if (cast) for (const it of ["bucket 2", "flint_and_steel"]) await rcon.komut(`give ${username} ${it}`);
       await sleep(1500);
@@ -307,7 +307,7 @@ async function netherKosu(args) {
       const [px, pz] = [Math.round(info.portal[0] / 8), Math.round(info.portal[1] / 8)];
       const d = Math.hypot(wx - px, wz - pz) || 1;
       const tx = Math.round(wx + ((wx - px) / d) * 64), tz = Math.round(wz + ((wz - pz) / d) * 64);
-      for (const it of ["stone_pickaxe", "stone_pickaxe", "stone_pickaxe", "stick 6", "stone_sword", "netherrack 128", "cooked_beef 12", "crafting_table", "blaze_rod 6"]) await rcon.komut(`give ${username} ${it}`);
+      for (const it of ["iron_pickaxe", "stone_pickaxe", "stone_pickaxe", "stick 6", "stone_sword", "netherrack 128", "cooked_beef 12", "crafting_table", "blaze_rod 6"]) await rcon.komut(`give ${username} ${it}`);
       await rcon.komut(`item replace entity ${username} armor.feet with golden_boots`); // piglinler saldırmasın (gerçek koşuda yıkık portal sandığından)
       await rcon.komut(`execute in minecraft:the_nether run spreadplayers ${tx} ${tz} 0 8 under 100 false ${username}`);
       await sleep(4000);
@@ -315,7 +315,7 @@ async function netherKosu(args) {
 
     if (bastionTest && rcon) {
       console.log("TEST: Nether bastion çevresine ışınlanıyor.");
-      for (const it of ["stone_pickaxe", "stone_pickaxe", "stone_pickaxe", "stick 6", "stone_sword", "netherrack 128", "cooked_beef 12", "crafting_table", "blaze_rod 6", ...(process.env.ALTIN_VER ? [`gold_ingot ${process.env.ALTIN_VER}`] : [])]) await rcon.komut(`give ${username} ${it}`); // ALTIN_VER=30: kazmayı atla, sadece takası test et
+      for (const it of ["iron_pickaxe", "stone_pickaxe", "stone_pickaxe", "stick 6", "stone_sword", "netherrack 128", "cooked_beef 12", "crafting_table", "blaze_rod 6", ...(process.env.ALTIN_VER ? [`gold_ingot ${process.env.ALTIN_VER}`] : [])]) await rcon.komut(`give ${username} ${it}`); // ALTIN_VER=30: kazmayı atla, sadece takası test et
       await rcon.komut(`execute in minecraft:the_nether run spreadplayers 30 20 0 10 under 86 false ${username}`).then((c) => console.log("TEST ışınlama:", c));
       await sleep(4000);
     }
@@ -324,7 +324,7 @@ async function netherKosu(args) {
       if (!info.kale) throw new Error("Bu seed'in kale konumu bilinmiyor");
       console.log("TEST: kaleye ışınlanıyor, gözler veriliyor (gerçek koşu değil).");
       await rcon.komut(`spreadplayers ${info.kale[0]} ${info.kale[1]} 0 4 false ${username}`);
-      for (const it of ["stone_pickaxe", "stone_pickaxe", "stone_pickaxe", "stick 6", "stone_sword", "cobblestone 64", "shield", "cooked_beef 12", "ender_eye 12"])
+      for (const it of ["iron_pickaxe", "stone_pickaxe", "stone_pickaxe", "stick 6", "stone_sword", "cobblestone 64", "shield", "cooked_beef 12", "ender_eye 12"])
         await rcon.komut(`give ${username} ${it}`);
       await sleep(1500);
     }

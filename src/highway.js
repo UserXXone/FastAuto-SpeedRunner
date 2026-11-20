@@ -231,6 +231,7 @@ async function walkInto(bot, to, jump) {
 // ön) blokla kapat. Böylece açık havada bile kapalı bir tüpün içinde ilerleriz:
 // hiçbir yaratık bizi göremez, vuramaz, köprüden itemez.
 async function step(bot, from, to, enclosed = false) {
+  if (!bot.inventory.items().some((i) => i.name.endsWith("_pickaxe"))) await A.ensurePickaxe(bot); // elle kazma 20 sn/adım
   const t0 = Date.now();
   const corridor = [to, to.offset(0, 1, 0)];
   if (to.y > from.y) corridor.push(from.offset(0, 2, 0)); // zıplarken başımız çarpmasın
