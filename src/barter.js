@@ -21,6 +21,32 @@ const piglinsNear = (bot, range = 12) => {
 
 const blockIsOpen = (b) => Boolean(b && b.boundingBox !== "block" && b.name !== "lava" && b.name !== "fire" && b.name !== "soul_fire");
 const flatDistance = (a, b) => Math.hypot(a.x - b.x, a.z - b.z);
+const GOLD_WALK_LIMIT = 96;
+const GOLD_ORE_RANGE = 24;
+
+// Cevheri hedef olarak vermek tehlikeli: highway range=1 ile cevherin tam
+// üstündeki hücrede de "vardım" diyebilir. Cevher tabandaysa kazma sonrası
+// botun zemini açılır ve düşer. Önce cevherin yatay komşularından güvenli bir
+// duruş hücresi seç; böylece kazılan blok hiçbir zaman botun ayağının altında
+// olmaz.
+function goldStand(bot, ore) {
+  const candidates = [
+    ore.offset(1, 0, 0), ore.offset(-1, 0, 0),
+    ore.offset(0, 0, 1), ore.offset(0, 0, -1),
+  ];
+  return candidates.find((p) => {
+    const feet = bot.blockAt(p);
+    const head = bot.blockAt(p.offset(0, 1, 0));
+    const floor = bot.blockAt(p.offset(0, -1, 0));
+    // Bir komşu cevheri yol açmak için istemeden kazmayalım. Dolgu/hava
+    // olabilir; highway gereken hücreyi zaten güvenli biçimde hazırlar.
+    if (feet?.name === "nether_gold_ore" || head?.name === "nether_gold_ore") return false;
+    if (!feet || !head || !floor) return false;
+    if (feet.name === "lava" || head.name === "lava" || floor.name === "lava") return false;
+    if (feet.name === "fire" || head.name === "fire" || feet.name === "soul_fire" || head.name === "soul_fire") return false;
+    return true;
+  });
+}
 
 function logPiglins(bot, piglins) {
   const list = piglins.slice(0, 3).map(p => {
@@ -127,28 +153,58 @@ async function settlePending(bot, pending) {
 }
 
 async function mineGold(bot, wantNuggets, say = () => {}, opts = {}) {
-  let emptyTries = 0;
+  let emptyTries = 0, walked = 0;
+  const maxWalk = opts.maxWalk ?? GOLD_WALK_LIMIT;
+  const tried = new Set();
   const end = Date.now() + (opts.maxMs || 240000), id = bot.registry.blocksByName.nether_gold_ore.id;
-  while (Date.now() < end && A.count(bot, "gold_nugget") < wantNuggets) {
+  while (Date.now() < end && walked < maxWalk && A.count(bot, "gold_nugget") < wantNuggets) {
+    if (bot.health != null && bot.health <= 0) {
+      A.dbg("altın: bot öldü, kazıyı durdur", H.cellOf(bot).toString(), "nugget", A.count(bot, "gold_nugget"));
+      break;
+    }
     const ores = bot.findBlocks({ matching: id, maxDistance: 48, count: 128 })
       .map(p => new Vec3(p.x, p.y, p.z)).filter(p => ![[0,0,0],[1,0,0],[-1,0,0],[0,1,0],[0,-1,0],[0,0,1],[0,0,-1]].some(([x,y,z]) => bot.blockAt(p.offset(x,y,z))?.name === "lava"))
       .filter(p => !opts.bastion || flatDistance(p, opts.bastion) <= 80)
+      .filter(p => p.distanceTo(bot.entity.position) <= GOLD_ORE_RANGE)
+      .filter(p => !tried.has(p.toString()))
       .sort((a,b) => {
         const score = p => p.distanceTo(bot.entity.position) + (opts.bastion ? 0.5 * flatDistance(p, opts.bastion) : 0);
         return score(a) - score(b);
       });
     const ore = ores[0];
     if (!ore) {
+      if (walked >= maxWalk) break;
       // Işınlandıktan/vardıktan hemen sonra chunk'lar yüklenmemiş olabiliyor (0 cevher bulup çıkıyorduk).
       if (++emptyTries <= 5) { await A.sleep(1500); continue; }
       A.dbg("altın: cevher yok", H.cellOf(bot).toString(), "64 blokta (filtresiz)", bot.findBlocks({ matching: id, maxDistance: 64, count: 200 }).length);
       break;
     }
-    const r = await H.highway(bot, ore, { enclosed: true, range: 1, maxMs: Math.min(60000, end-Date.now()) });
-    if (r !== "arrived") break;
+    const stand = goldStand(bot, ore);
+    const before = bot.entity.position.clone();
+    const beforeCell = H.cellOf(bot);
+    const route = Math.abs(stand?.x - beforeCell.x) + Math.abs(stand?.y - beforeCell.y) + Math.abs(stand?.z - beforeCell.z);
+    const dist = ore.distanceTo(before);
+    if (!stand || route + walked > maxWalk) {
+      tried.add(ore.toString());
+      A.dbg("altın: cevher", ore.toString(), "bot", H.cellOf(bot).toString(), `highway=atlandı(${!stand ? "güvenli duruş yok" : "yürüme limiti"})`, "nugget", A.count(bot, "gold_nugget"));
+      continue;
+    }
+    A.dbg("altın: cevher", ore.toString(), "bot", H.cellOf(bot).toString(), `mesafe=${dist.toFixed(1)}`, "highway=başlıyor", "nugget", A.count(bot, "gold_nugget"));
+    const r = await H.highway(bot, stand, { enclosed: true, range: 0, maxMs: Math.min(60000, end-Date.now()) });
+    // Otoyol düz çizgiden değil, hücre hücre (Manhattan) yürür; limiti
+    // iyimser Öklid mesafesiyle aşmamayı garanti etmek için planlanan rotayı
+    // say. Başarısız/yarım rota da bütçeyi tüketir.
+    walked += route;
+    tried.add(ore.toString());
+    A.dbg("altın: cevher", ore.toString(), "bot", H.cellOf(bot).toString(), "highway", r, "nugget", A.count(bot, "gold_nugget"), `yürüme=${walked.toFixed(1)}/${maxWalk}`);
+    if (r !== "arrived") {
+      if (bot.health != null && bot.health <= 0) break;
+      continue;
+    }
     const b = bot.blockAt(ore); if (!b || b.name !== "nether_gold_ore") continue;
     try { await A.withHand(bot, async () => { const {item}=A.fastestTool(bot,b); if(item) await bot.equip(item,"hand"); await bot.dig(b,true); }); } catch (_) { continue; }
     await A.sleep(500); await A.collectDrops(bot, bot.entity.position, 4);
+    A.dbg("altın: cevher", ore.toString(), "bot", H.cellOf(bot).toString(), "highway=kazıldı", "nugget", A.count(bot, "gold_nugget"));
   }
   return A.count(bot,"gold_nugget");
 }
