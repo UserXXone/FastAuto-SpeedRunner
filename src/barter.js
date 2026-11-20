@@ -24,7 +24,7 @@ const piglinsNear = (bot, range = 12) => {
 const blockIsOpen = (b) => Boolean(b && b.boundingBox !== "block" && b.name !== "lava" && b.name !== "fire" && b.name !== "soul_fire");
 const flatDistance = (a, b) => Math.hypot(a.x - b.x, a.z - b.z);
 const GOLD_WALK_LIMIT = 400; // 96 ile 13 külçede kalıyordu; takas için ~30 lazım
-const GOLD_ORE_RANGE = 24;
+const GOLD_ORE_RANGE = 40; // 24'te çölde 200 cevher varken 'cevher yok' diyordu
 
 // Cevheri hedef olarak vermek tehlikeli: highway range=1 ile cevherin tam
 // üstündeki hücrede de "vardım" diyebilir. Cevher tabandaysa kazma sonrası
@@ -259,7 +259,7 @@ async function mineGold(bot, wantNuggets, say = () => {}, opts = {}) {
     const ores = bot.findBlocks({ matching: id, maxDistance: 48, count: 128 })
       .map(p => new Vec3(p.x, p.y, p.z)).filter(p => ![[0,0,0],[1,0,0],[-1,0,0],[0,1,0],[0,-1,0],[0,0,1],[0,0,-1]].some(([x,y,z]) => bot.blockAt(p.offset(x,y,z))?.name === "lava"))
       .filter(p => !opts.bastion || flatDistance(p, opts.bastion) <= 80)
-      .filter(p => Math.abs(p.y - bot.entity.position.y) <= 12 && Math.abs(p.y - targetY) <= 12)
+      .filter(p => Math.abs(p.y - bot.entity.position.y) <= 12 && (!opts.bastion || Math.abs(p.y - targetY) <= 12)) // Y hedefi sadece bastion'da
       // Piglin görürken altın cevheri kazınca piglinler (altın botla bile) saldırıyor (öldük):
       // 18 blok içinde piglin/brute olan cevheri alma.
       .filter(p => !Object.values(bot.entities).some(e => /^piglin/.test(e.name || "") && e.position.distanceTo(p) < 18))
