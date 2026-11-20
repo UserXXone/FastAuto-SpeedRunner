@@ -8,7 +8,6 @@
 const fs = require("fs");
 const path = require("path");
 const crypto = require("crypto");
-const { execFileSync } = require("child_process");
 const mineflayer = require("mineflayer");
 const { pathfinder } = require("mineflayer-pathfinder");
 const { Rcon, jarHazirla, sunucuAc, sunucuKapat, SURUM } = require("../dogrulama/sunucu");
@@ -24,8 +23,6 @@ const RESULTS = path.join(ROOT, "kosu", "veri", "kosular.json");
 const STATUS = path.join(ROOT, "kosu", "veri", "durum.json");
 const PORT = 25565;
 const RCON_PORT = 25575;
-const HUNTER = "seed-avci";
-const VERIFIER = "seed-dogrulama";
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const { GOALS } = nether; // koşunun nereye kadar gideceği (--hedef)
 
@@ -56,14 +53,6 @@ function seedInfo(seed, args) {
       "Bu seed'in portal konumu bilinmiyor. Panelde olan bir seed ver ya da --portal x,z ekle.",
     );
   return info;
-}
-
-function serviceActive(name) {
-  try {
-    return execFileSync("systemctl", ["is-active", name], { stdio: ["ignore", "pipe", "ignore"] }).toString().trim() === "active";
-  } catch {
-    return false;
-  }
 }
 
 function writeJson(file, data) {
@@ -202,7 +191,6 @@ async function netherKosu(args) {
   const result = { seed, zaman: Math.floor(Date.now() / 1000), hedef: GOALS.includes(args.hedef) ? args.hedef : "blaze", basla: start, basarili: false };
   let server = null;
   let rcon = null;
-  let hunterStopped = false;
   let bot = null;
   const cleanup = async () => {
     try { if (bot) bot.quit(); } catch { /* */ }
@@ -213,15 +201,11 @@ async function netherKosu(args) {
     await sunucuKapat(server, rcon).catch(() => {});
     if (rcon) rcon.kapat();
     if (server && !args.tut) fs.rmSync(WORLD, { recursive: true, force: true });
-    if (hunterStopped) {
-      try { execFileSync("systemctl", ["start", HUNTER]); console.log("Seed avcısı tekrar açıldı."); } catch { /* */ }
-    }
   };
   const onSignal = () => {
     setStatus({ calisiyor: false, asama: "durduruldu" });
     try { saveResult({ ...result, hata: "durduruldu" }); } catch { /* */ }
     if (server && server.exitCode === null) server.kill("SIGKILL");
-    if (hunterStopped) try { execFileSync("systemctl", ["start", HUNTER]); } catch { /* */ }
     process.exit(130);
   };
   process.on("SIGINT", onSignal);
@@ -230,13 +214,6 @@ async function netherKosu(args) {
   setStatus({ seed, baslangic: result.zaman, asama: "sunucu açılıyor", hedef: result.hedef, basla: start, envanter: null, can: null, aclik: null, boyut: null, kafa: null });
   try {
     if (!external) {
-      if (serviceActive(VERIFIER))
-        throw new Error("Seed doğrulaması çalışıyor; ikisine birden RAM yetmez. Önce panelden durdur.");
-      if (serviceActive(HUNTER)) {
-        console.log("Seed avcısı duraklatılıyor (RAM ve işlemci için)...");
-        execFileSync("systemctl", ["stop", HUNTER]);
-        hunterStopped = true;
-      }
       jarHazirla(console.log);
       const sifre = crypto.randomBytes(12).toString("hex");
       console.log("Sunucu açılıyor...");

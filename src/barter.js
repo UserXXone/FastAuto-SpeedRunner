@@ -36,6 +36,24 @@ const blockIsOpen = (b) => Boolean(b && b.boundingBox !== "block" && b.name !== 
 const flatDistance = (a, b) => Math.hypot(a.x - b.x, a.z - b.z);
 const GOLD_WALK_LIMIT = 400; // 96 ile 13 külçede kalıyordu; takas için ~30 lazım
 const GOLD_ORE_RANGE = 40; // 24'te çölde 200 cevher varken 'cevher yok' diyordu
+const FORTRESS_BLOCKS = new Set(["nether_bricks", "nether_brick_fence", "nether_brick_stairs"]);
+const GOLD_DANGERS = new Set(["blaze", "ghast", "skeleton", "wither_skeleton", "hoglin", "piglin_brute"]);
+
+function fortressNear(bot, p, radius = 4) {
+  for (let dx = -radius; dx <= radius; dx++) for (let dy = -radius; dy <= radius; dy++) {
+    for (let dz = -radius; dz <= radius; dz++) {
+      if (FORTRESS_BLOCKS.has(bot.blockAt(p.offset(dx, dy, dz))?.name)) return true;
+    }
+  }
+  return false;
+}
+
+function goldDanger(bot, range = 16) {
+  const me = bot.entity.position;
+  return Object.values(bot.entities)
+    .filter(e => GOLD_DANGERS.has(e.name) && e.position && e.position.distanceTo(me) <= range)
+    .sort((a, b) => a.position.distanceTo(me) - b.position.distanceTo(me))[0] || null;
+}
 
 // Cevheri hedef olarak vermek tehlikeli: highway range=1 ile cevherin tam
 // üstündeki hücrede de "vardım" diyebilir. Cevher tabandaysa kazma sonrası
@@ -70,9 +88,11 @@ function logPiglins(bot, piglins) {
   A.dbg("Takas turu piglinleri:", list.length ? list.join(" | ") : "yok");
 }
 
-function visiblePiglinCluster(bot) {
+function visiblePiglinCluster(bot, accept = () => true) {
   const me = bot.entity.position;
-  const visible = visibleTradePiglins(bot).filter(p => !tradeMobNear(bot, p.position, 16));
+  const visible = visibleTradePiglins(bot)
+    .filter(p => !tradeMobNear(bot, p.position, 16))
+    .filter(accept);
   return visible.map(p => {
     const neighbors = visible.filter(q => q.position.distanceTo(p.position) <= 10);
     return {
@@ -116,7 +136,9 @@ async function ensureTradeRange(bot, maxMs) {
 
 async function reachPiglins(bot, target, maxMs) {
   const deadline = Date.now() + maxMs;
-  const nearEnough = () => piglinsNear(bot, 12).length >= (target ? 2 : 1);
+  // Tek piglin de seri takas yapabilir; iki entity beklemek güvenli alanın
+  // kenarında gereksiz yere erişim zaman aşımına yol açıyordu.
+  const nearEnough = () => piglinsNear(bot, 12).length >= 1;
   const remaining = () => Math.max(1000, deadline - Date.now());
   let fallbackRetryAt = 0;
   const searchOrigin = H.cellOf(bot);
@@ -197,7 +219,43 @@ async function reachPiglins(bot, target, maxMs) {
       return true;
     }
 
-    const cluster = visiblePiglinCluster(bot);
+    // Bilinen güvenli Nether çölü gibi açıkça verilen bir ticaret alanı varsa,
+    // yüklenmiş chunk'lardaki uzak/yüksek bir piglin kümesine kapılma. Önce
+    // hedef bölgeye kapalı tünelle ulaş; oradaki entity'ler sonra seçilir.
+    if (target && flatDistance(bot.entity.position, target) > 8) {
+      const dest = { x: target.x, z: target.z };
+      const targetY = target.y ?? searchY;
+      logPiglinTarget(bot, "bilinen ticaret alanı", { x: dest.x, y: targetY, z: dest.z });
+      let result = "not-started";
+      try {
+        result = await shortTradeHighway(dest, targetY, Math.min(60000, remaining()));
+      } catch (err) {
+        A.dbg("Takas: bilinen alana yol hatası", err.message);
+      }
+      A.dbg("Takas: bilinen alan sonucu", result, H.cellOf(bot).toString());
+      if (result === "no-blocks") return false;
+      if (nearEnough() && await ensureTradeRange(bot, Math.min(30000, remaining()))) return true;
+      await A.sleep(Math.min(500, remaining()));
+      continue;
+    }
+
+    // Hedef alanın chunk'ı yüklendiğinde oradaki kümeyi seç. Orada piglin
+    // yoksa, aynı kotta görünen güvenli kümeye kontrollü fallback yap; eski
+    // davranış uzak ama yüksek kümeye saplanıp üç dakikayı tüketiyordu.
+    const localCluster = target
+      ? visiblePiglinCluster(bot, p => flatDistance(p.position, target) <= 32)
+      : null;
+    const sameLevelCluster = target
+      ? visiblePiglinCluster(bot, p => Math.abs(p.position.y - bot.entity.position.y) <= 14)
+      : null;
+    const safeFallbackCluster = target ? visiblePiglinCluster(bot) : null;
+    const cluster = localCluster || sameLevelCluster || safeFallbackCluster || (!target ? visiblePiglinCluster(bot) : null);
+    if (target && !localCluster && sameLevelCluster) {
+      A.dbg("Takas: aynı kotta güvenli piglin fallback", `mesafe=${flatDistance(sameLevelCluster.piglin.position, bot.entity.position).toFixed(1)}`);
+    }
+    if (target && !localCluster && !sameLevelCluster && safeFallbackCluster) {
+      A.dbg("Takas: uzak ama güvenli piglin fallback", `mesafe=${flatDistance(safeFallbackCluster.piglin.position, bot.entity.position).toFixed(1)}`, `y=${Math.round(safeFallbackCluster.piglin.position.y)}`);
+    }
     if (cluster) {
       fallbackRetryAt = 0;
       const p = cluster.piglin.position;
@@ -260,7 +318,7 @@ async function reachPiglins(bot, target, maxMs) {
       await A.sleep(Math.min(500, remaining()));
       continue;
     }
-    const fallback = { x: target.x, y: 60, z: target.z };
+    const fallback = { x: target.x, y: target.y ?? 60, z: target.z };
     logPiglinTarget(bot, "piglin görünmüyor, bastion taraması", fallback);
     let result = "not-started";
     try {
@@ -272,6 +330,7 @@ async function reachPiglins(bot, target, maxMs) {
       A.dbg("Takas: bastion tarama yolunda hata", err.message);
     }
     A.dbg("Takas: bastion tarama sonucu", result, H.cellOf(bot).toString());
+    if (result === "no-blocks") return false;
     fallbackRetryAt = Date.now() + 20000;
     if (nearEnough() && await ensureTradeRange(bot, Math.min(30000, remaining()))) return true;
     await A.sleep(Math.min(500, remaining()));
@@ -290,6 +349,15 @@ async function wearGoldBoots(bot) {
     if (A.count(bot, "gold_ingot") >= 4) await A.craft(bot, "golden_boots", 1, tb);
     const boots = bot.inventory.items().find((i) => i.name === "golden_boots");
     if (boots) { await bot.equip(boots, "feet"); A.dbg("altın: altın bot giyildi"); }
+    // Madencilik sırasında masa geride kalırsa, aşama sonunda yeni masa için
+    // kütük arayıp koşuyu düşürmesin. Geçici olarak koyduğumuz masayı geri al.
+    const placed = bot.blockAt(tb.position);
+    if (placed?.name === "crafting_table" && A.count(bot, "crafting_table") === 0) {
+      await A.withHand(bot, async () => bot.dig(placed, true));
+      await A.sleep(250);
+      await A.collectDrops(bot, placed.position, 2);
+      A.dbg("altın: crafting table envantere alındı");
+    }
   } catch (err) { A.dbg("altın bot yapılamadı:", err.message); }
 }
 
@@ -304,6 +372,13 @@ async function mineGold(bot, wantNuggets, say = () => {}, opts = {}) {
       A.dbg("altın: bot öldü, kazıyı durdur", H.cellOf(bot).toString(), "nugget", A.count(bot, "gold_nugget"));
       break;
     }
+    const danger = goldDanger(bot);
+    if (danger) {
+      A.dbg("altın: düşmandan kaçıyorum", danger.name, H.cellOf(bot).toString());
+      const me = bot.entity.position, d = danger.position.distanceTo(me) || 1;
+      await A.goto(bot, new GoalNearXZ(Math.round(me.x + (me.x - danger.position.x) / d * 20), Math.round(me.z + (me.z - danger.position.z) / d * 20)), 10000);
+      continue;
+    }
     const ores = bot.findBlocks({ matching: id, maxDistance: 48, count: 128 })
       .map(p => new Vec3(p.x, p.y, p.z)).filter(p => ![[0,0,0],[1,0,0],[-1,0,0],[0,1,0],[0,-1,0],[0,0,1],[0,0,-1]].some(([x,y,z]) => bot.blockAt(p.offset(x,y,z))?.name === "lava"))
       .filter(p => !opts.bastion || flatDistance(p, opts.bastion) <= 80)
@@ -311,6 +386,7 @@ async function mineGold(bot, wantNuggets, say = () => {}, opts = {}) {
       // Piglin görürken altın cevheri kazınca piglinler (altın botla bile) saldırıyor (öldük):
       // 18 blok içinde piglin/brute olan cevheri alma.
       .filter(p => !Object.values(bot.entities).some(e => /^piglin/.test(e.name || "") && e.position.distanceTo(p) < 18))
+      .filter(p => !fortressNear(bot, p))
       .filter(p => p.distanceTo(bot.entity.position) <= GOLD_ORE_RANGE)
       .filter(p => !tried.has(p.toString()))
       .sort((a,b) => {
@@ -336,7 +412,28 @@ async function mineGold(bot, wantNuggets, say = () => {}, opts = {}) {
       continue;
     }
     A.dbg("altın: cevher", ore.toString(), "bot", H.cellOf(bot).toString(), `mesafe=${dist.toFixed(1)}`, "highway=başlıyor", "nugget", A.count(bot, "gold_nugget"));
-    const r = await H.highway(bot, stand, { enclosed: true, range: 0, maxMs: Math.min(60000, end-Date.now()) });
+    let r = "error";
+    try {
+      r = await H.highway(bot, stand, {
+        enclosed: true,
+        range: 0,
+        maxMs: Math.min(60000, end-Date.now()),
+        onTick: async () => {
+          const danger = goldDanger(bot);
+          if (danger) throw new Error(`gold-danger:${danger.name}`);
+        },
+      });
+    } catch (err) {
+      const danger = goldDanger(bot);
+      if (danger) {
+        A.dbg("altın: yol sırasında düşman, cevher atlandı", danger.name, H.cellOf(bot).toString());
+        const me = bot.entity.position, d = danger.position.distanceTo(me) || 1;
+        await A.goto(bot, new GoalNearXZ(Math.round(me.x + (me.x - danger.position.x) / d * 20), Math.round(me.z + (me.z - danger.position.z) / d * 20)), 10000);
+        r = "danger";
+      } else {
+        A.dbg("altın: yol hatası", err.message, H.cellOf(bot).toString());
+      }
+    }
     // Otoyol düz çizgiden değil, hücre hücre (Manhattan) yürür; limiti
     // iyimser Öklid mesafesiyle aşmamayı garanti etmek için planlanan rotayı
     // say. Başarısız/yarım rota da bütçeyi tüketir.
@@ -378,7 +475,11 @@ function tradeDanger(bot) {
   const ranged = new Set(["skeleton", "wither_skeleton"]);
   const melee = new Set(["piglin_brute", "hoglin"]);
   return Object.values(bot.entities)
-    .filter(e => e.position && (melee.has(e.name) ? e.position.distanceTo(me) <= 12 : ranged.has(e.name) && e.position.distanceTo(me) <= 8))
+    .filter(e => e.position && (
+      melee.has(e.name) ? e.position.distanceTo(me) <= 12 :
+      ranged.has(e.name) ? e.position.distanceTo(me) <= 8 :
+      e.name === "blaze" ? e.position.distanceTo(me) <= 12 :
+      e.name === "ghast" && e.position.distanceTo(me) <= 24))
     .sort((a, b) => a.position.distanceTo(me) - b.position.distanceTo(me))[0] || null;
 }
 
@@ -441,16 +542,35 @@ async function throwTradeGold(bot, piglin) {
   const p = bot.entities[piglin.id] || piglin;
   const item = bot.inventory.items().find(i => i.name === "gold_ingot");
   if (!p || !item) return null;
-  await bot.lookAt(p.position.offset(0, 0.3, 0), true);
+  // Piglinin ayaklarına nişanlamak külçeyi duvara/ayağa bırakabiliyor. Vanilla
+  // oyuncu testinde çalışan geometri: botun baktığı yatay yönde yaklaşık iki
+  // blok ileri, göz hizası. Böylece eşya piglinin hemen önüne düşer.
+  const me = bot.entity.position;
+  let dx = p.position.x - me.x, dz = p.position.z - me.z;
+  const flat = Math.hypot(dx, dz) || 1;
+  dx /= flat; dz /= flat;
+  const aim = new Vec3(me.x + dx * 2, me.y + 1.5, me.z + dz * 2);
+  await bot.lookAt(aim, true);
   const before = A.count(bot, "gold_ingot");
   const beforeDrops = new Set(drops(bot, "gold_ingot").map(e => e.id));
   await bot.toss(item.type, null, 1);
-  await A.sleep(250);
+  let drop = null;
+  const observeUntil = Date.now() + 900;
+  while (Date.now() < observeUntil) {
+    drop = drops(bot, "gold_ingot").find(e => !beforeDrops.has(e.id));
+    if (drop) break;
+    if (A.count(bot, "gold_ingot") < before) {
+      A.dbg("Takas: külçe atışı piglin hemen aldı", `piglin=${piglin.id}`);
+      return { id: null, piglin: piglin.id, at: Date.now(), position: aim };
+    }
+    await A.sleep(100);
+  }
   const after = A.count(bot, "gold_ingot");
-  const drop = drops(bot, "gold_ingot").find(e => !beforeDrops.has(e.id));
-  A.dbg("Takas: külçe atışı", `önce=${before}`, `sonra=${after}`, `piglin=${piglin.id}`, drop ? `drop=${drop.id}` : "drop=?");
+  A.dbg("Takas: külçe atışı", `önce=${before}`, `sonra=${after}`, `piglin=${piglin.id}`,
+    `nişan=${aim.x.toFixed(1)},${aim.y.toFixed(1)},${aim.z.toFixed(1)}`,
+    drop ? `drop=${drop.id}@${drop.position.toString()}` : "drop=?");
   if (after >= before && !drop) return null;
-  return { id: drop?.id ?? null, piglin: piglin.id, at: Date.now(), position: drop?.position?.clone?.() || bot.entity.position.clone() };
+  return { id: drop?.id ?? null, piglin: piglin.id, at: Date.now(), position: drop?.position?.clone?.() || aim };
 }
 
 async function retreatAfterTrade(bot, piglin) {
@@ -484,7 +604,7 @@ function updateTradeAttempts(bot, attempts, failed, onTaken = () => {}) {
 }
 
 async function barter(bot, needPearls, say = () => {}, opts = {}) {
-  const t0=Date.now(), maxMs=opts.maxMs||360000, target=opts.bastion;
+  const t0=Date.now(), maxMs=opts.maxMs||360000, target=opts.tradeTarget || opts.bastion;
   // Kazma bütün netherrack'i yedi: kapalı yol 'no-blocks' deyip 3 dk boşa döndü. Önce blok topla.
   if (A.count(bot, H.isFiller) < 32) { const b0 = A.count(bot, H.isFiller); await H.mineTunnel(bot, 64, 50); A.dbg("Takas: blok toplandı", b0, "→", A.count(bot, H.isFiller)); }
   const travelMs = Math.min(180000, Math.max(1000, maxMs - (Date.now() - t0)));

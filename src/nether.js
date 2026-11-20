@@ -241,15 +241,17 @@ async function stagePearls(bot, info, timer, say, guard) {
   // Takas bastion'da DEĞİL, bulunduğumuz Nether çölünde: ölçüldü, portal/fortress çevresinde 5-6 piglin
   // var ama brute/hoglin yok; bastion'da 3 brute bizi iki kez öldürdü. TAKAS=0 ile kapatılır.
   if (process.env.TAKAS !== "0") {
-    const bastion = null;
+    // Doğrulanmış seed'de portal/fortress arasındaki çöl düz ve brute/hoglin
+    // yok. Bastion koordinatına gitmek yerine bu güvenli ticaret alanını hedefle.
+    const tradeTarget = { x: 22, z: 13 };
     let nuggets=A.count(bot,"gold_nugget");
-    if(nuggets<9){nuggets=await B.mineGold(bot,Math.max(18,need*36),say,{bastion,maxMs:420000});timer.split(`Altın (${Math.floor(nuggets/9)} külçe)`);}
+    if(nuggets<9){nuggets=await B.mineGold(bot,Math.max(18,need*36),say,{maxMs:420000});timer.split(`Altın (${Math.floor(nuggets/9)} külçe)`);}
     if(nuggets>=9){const tb=await A.ensureTable(bot); // masa verilmezse 3x3 tarif yapılamıyordu
       // Tek seferde 13 kez craft istenince 1 tane yapıp kalıyordu (parçacıklar iki yığında): tek tek.
       for(let k=0;k<20&&A.count(bot,"gold_nugget")>=9;k++){const b0=A.count(bot,"gold_ingot");try{await A.craft(bot,"gold_ingot",1,tb);}catch(e){A.dbg("külçe craft:",e.message);}if(A.count(bot,"gold_ingot")<=b0)break;}
       A.dbg("külçe:",A.count(bot,"gold_ingot"),"parçacık kaldı:",A.count(bot,"gold_nugget"));}
     if(A.count(bot,"gold_ingot")>=4 && !C.wearsGold(bot)){await A.craft(bot,"golden_boots",1,await A.ensureTable(bot));const boots=bot.inventory.items().find(i=>i.name==="golden_boots");if(boots)await bot.equip(boots,"feet");}
-    if(A.count(bot,"gold_ingot")) {const res=await B.barter(bot,need,say,{bastion});timer.split(`Takas (${res.pearls} pearl)`);need=Math.max(0,need-res.pearls);}
+    if(A.count(bot,"gold_ingot")) {const res=await B.barter(bot,need,say,{tradeTarget});timer.split(`Takas (${res.pearls} pearl)`);need=Math.max(0,need-res.pearls);}
   }
   // Takas yettiyse avı atla ama gözleri yine yap.
   if (need <= 0) {
