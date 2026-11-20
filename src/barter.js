@@ -23,7 +23,7 @@ const piglinsNear = (bot, range = 12) => {
 
 const blockIsOpen = (b) => Boolean(b && b.boundingBox !== "block" && b.name !== "lava" && b.name !== "fire" && b.name !== "soul_fire");
 const flatDistance = (a, b) => Math.hypot(a.x - b.x, a.z - b.z);
-const GOLD_WALK_LIMIT = 96;
+const GOLD_WALK_LIMIT = 400; // 96 ile 13 külçede kalıyordu; takas için ~30 lazım
 const GOLD_ORE_RANGE = 24;
 
 // Cevheri hedef olarak vermek tehlikeli: highway range=1 ile cevherin tam

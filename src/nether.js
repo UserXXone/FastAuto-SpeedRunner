@@ -241,7 +241,7 @@ async function stagePearls(bot, info, timer, say, guard) {
   if (info.bastion && Math.hypot(info.bastion[0]-bot.entity.position.x,info.bastion[1]-bot.entity.position.z)<250) {
     const bastion = {x:info.bastion[0],z:info.bastion[1]};
     let nuggets=A.count(bot,"gold_nugget");
-    if(nuggets<9){nuggets=await B.mineGold(bot,Math.max(18,need*36),say,{bastion});timer.split(`Altın (${Math.floor(nuggets/9)} külçe)`);}
+    if(nuggets<9){nuggets=await B.mineGold(bot,Math.max(18,need*36),say,{bastion,maxMs:420000});timer.split(`Altın (${Math.floor(nuggets/9)} külçe)`);}
     if(nuggets>=9){const tb=await A.ensureTable(bot); // masa verilmezse 3x3 tarif yapılamıyordu
       // Tek seferde 13 kez craft istenince 1 tane yapıp kalıyordu (parçacıklar iki yığında): tek tek.
       for(let k=0;k<20&&A.count(bot,"gold_nugget")>=9;k++){const b0=A.count(bot,"gold_ingot");try{await A.craft(bot,"gold_ingot",1,tb);}catch(e){A.dbg("külçe craft:",e.message);}if(A.count(bot,"gold_ingot")<=b0)break;}
