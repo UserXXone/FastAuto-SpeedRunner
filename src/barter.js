@@ -723,7 +723,7 @@ async function barter(bot, needPearls, say = () => {}, opts = {}) {
     if (candidates.length) lastPiglin=Date.now();
     if (!candidates.length) {
       if (waitMode && Date.now()-lastPiglin>=15000) {
-        const visible = visibleTradePiglins(bot).filter(p => !isBabyPiglin(p) && p.position && fortDist(p.position) >= 48)
+        const visible = visibleTradePiglins(bot).filter(p => !isBabyPiglin(p) && p.position && fortDist(p.position) >= 48 && flatDistance(p.position, bot.entity.position) <= 32 && Math.abs(p.position.y - bot.entity.position.y) <= 6) // 80 bloktaki piglin için dağı kazıp kazmaları bitiriyordu
           .sort((a,b) => a.position.distanceTo(bot.entity.position)-b.position.distanceTo(bot.entity.position));
         if (visible.length) await approachWaitTradePiglin(bot, visible[0]);
         else if (!waitFallbackUsed) {
