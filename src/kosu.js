@@ -295,6 +295,7 @@ async function netherKosu(args) {
         for (const [slot, it] of [["chest", "diamond_chestplate"], ["legs", "diamond_leggings"], ["feet", "diamond_boots"]])
           await rcon.komut(`item replace entity ${username} armor.${slot} with ${it}`);
         for (const it of ["diamond_pickaxe", "diamond_pickaxe", "diamond_sword", "golden_apple 8"]) await rcon.komut(`give ${username} ${it}`);
+        await rcon.komut(`execute in minecraft:the_end run spreadplayers 5.5 0.5 0 1 under 80 false ${username}`); // şov: tünel yok, doğrudan fıskiye yanı (zemin üstü)
       }
       // Kristaller dururken ejderha nadiren iniyor (15 dk'da hiç inmedi). Yatak
       // patlatmayı ölçmek için testte kristaller kaldırılabilir: --kristal-yok

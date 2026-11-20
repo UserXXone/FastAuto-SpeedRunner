@@ -705,6 +705,13 @@ async function killDragonBowl(bot, say = () => {}, opts = {}) {
   bot.on("bossBarUpdated", onBar);
   bot.on("bossBarCreated", onBar);
   const hpTxt = () => (bot._dragonHp != null ? Math.round(bot._dragonHp * 200) : "?");
+  // Nefes hangi aşamada gelirse gelsin: arka planda can 13 altına inince altın elma ye.
+  let eating = false;
+  const appleTimer = setInterval(async () => {
+    if (eating || bot.health >= 13 || bot.health <= 0 || A.count(bot, "golden_apple") === 0) return;
+    eating = true;
+    try { say(`  altın elma (can ${bot.health.toFixed(0)})`); await C.eat(bot, { golden: true }); } catch (_) {} finally { eating = false; }
+  }, 250);
   try {
     // Kristaller (testte kaldırılmış olabilir): platformdan görünenleri vur.
     if (bow(bot) && arrows(bot)) {
@@ -817,6 +824,7 @@ async function killDragonBowl(bot, say = () => {}, opts = {}) {
       await A.sleep(150);
     }
   } finally {
+    clearInterval(appleTimer);
     bot.removeListener("entityDead", onDead);
   }
   return { killed, bombs, ms: Date.now() - t0 };
