@@ -141,6 +141,7 @@ async function mineGold(bot, wantNuggets, say = () => {}, opts = {}) {
     if (!ore) {
       // Işınlandıktan/vardıktan hemen sonra chunk'lar yüklenmemiş olabiliyor (0 cevher bulup çıkıyorduk).
       if (++emptyTries <= 5) { await A.sleep(1500); continue; }
+      A.dbg("altın: cevher yok", H.cellOf(bot).toString(), "64 blokta (filtresiz)", bot.findBlocks({ matching: id, maxDistance: 64, count: 200 }).length);
       break;
     }
     const r = await H.highway(bot, ore, { enclosed: true, range: 1, maxMs: Math.min(60000, end-Date.now()) });
