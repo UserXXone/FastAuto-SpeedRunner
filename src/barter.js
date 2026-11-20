@@ -601,8 +601,8 @@ function waitTradePiglins(bot, thrown, failed, attempts) {
   const me = bot.entity.position;
   const eye = me.offset(0, bot.entity.eyeHeight || 1.62, 0);
   return Object.values(bot.entities)
-    // Aynı piglin tekrar takas yapabilir: kalıcı yasak yok, son atıştan 20 sn sonra yine aday.
-    .filter(p => p.name === "piglin" && !isBabyPiglin(p) && !(Date.now() - (thrown.get(p.id) || 0) < 20000) &&
+    // Aynı piglin tekrar takas yapabilir: kalıcı yasak yok, piglin külçeye ~6 sn bakıp verir, sonra yine aday.
+    .filter(p => p.name === "piglin" && !isBabyPiglin(p) && !(Date.now() - (thrown.get(p.id) || 0) < 6000) &&
       !attempts.some(a => a.piglin === p.id) && p.position)
     .filter(p => flatDistance(p.position, me) <= 9 && Math.abs(p.position.y - me.y) <= 2)
     .filter(p => {
