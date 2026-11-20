@@ -127,6 +127,7 @@ async function settlePending(bot, pending) {
 }
 
 async function mineGold(bot, wantNuggets, say = () => {}, opts = {}) {
+  let emptyTries = 0;
   const end = Date.now() + (opts.maxMs || 240000), id = bot.registry.blocksByName.nether_gold_ore.id;
   while (Date.now() < end && A.count(bot, "gold_nugget") < wantNuggets) {
     const ores = bot.findBlocks({ matching: id, maxDistance: 48, count: 128 })
@@ -136,7 +137,12 @@ async function mineGold(bot, wantNuggets, say = () => {}, opts = {}) {
         const score = p => p.distanceTo(bot.entity.position) + (opts.bastion ? 0.5 * flatDistance(p, opts.bastion) : 0);
         return score(a) - score(b);
       });
-    const ore = ores[0]; if (!ore) break;
+    const ore = ores[0];
+    if (!ore) {
+      // Işınlandıktan/vardıktan hemen sonra chunk'lar yüklenmemiş olabiliyor (0 cevher bulup çıkıyorduk).
+      if (++emptyTries <= 5) { await A.sleep(1500); continue; }
+      break;
+    }
     const r = await H.highway(bot, ore, { enclosed: true, range: 1, maxMs: Math.min(60000, end-Date.now()) });
     if (r !== "arrived") break;
     const b = bot.blockAt(ore); if (!b || b.name !== "nether_gold_ore") continue;
