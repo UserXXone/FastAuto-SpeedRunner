@@ -283,6 +283,16 @@ async function reachPiglins(bot, target, maxMs) {
   return false;
 }
 
+async function wearGoldBoots(bot) {
+  try {
+    const tb = await A.ensureTable(bot);
+    for (let k = 0; k < 4 && A.count(bot, "gold_ingot") < 4 && A.count(bot, "gold_nugget") >= 9; k++) await A.craft(bot, "gold_ingot", 1, tb);
+    if (A.count(bot, "gold_ingot") >= 4) await A.craft(bot, "golden_boots", 1, tb);
+    const boots = bot.inventory.items().find((i) => i.name === "golden_boots");
+    if (boots) { await bot.equip(boots, "feet"); A.dbg("altın: altın bot giyildi"); }
+  } catch (err) { A.dbg("altın bot yapılamadı:", err.message); }
+}
+
 async function mineGold(bot, wantNuggets, say = () => {}, opts = {}) {
   let emptyTries = 0, walked = 0;
   const maxWalk = opts.maxWalk ?? GOLD_WALK_LIMIT;
@@ -341,6 +351,8 @@ async function mineGold(bot, wantNuggets, say = () => {}, opts = {}) {
     try { await A.withHand(bot, async () => { const {item}=A.fastestTool(bot,b); if(item) await bot.equip(item,"hand"); await bot.dig(b,true); }); } catch (_) { continue; }
     await A.sleep(500); await A.collectDrops(bot, bot.entity.position, 4);
     A.dbg("altın: cevher", ore.toString(), "bot", H.cellOf(bot).toString(), "highway=kazıldı", "nugget", A.count(bot, "gold_nugget"));
+    // Altın zırh yoksa piglinler saldırıyor (kazarken öldük): 36 parçacık olunca hemen altın bot.
+    if (!C.wearsGold(bot) && A.count(bot, "gold_nugget") >= 36) await wearGoldBoots(bot);
   }
   A.dbg("altın: kazma bitti", `bot=${H.cellOf(bot).toString()}`, `konum=${bot.entity.position.toString()}`, "nugget", A.count(bot, "gold_nugget"));
   return A.count(bot,"gold_nugget");
