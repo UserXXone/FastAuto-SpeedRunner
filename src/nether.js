@@ -382,6 +382,7 @@ async function run(bot, info, opts = {}) {
     if (opts.chat) bot.chat(msg);
   };
   A.safeDigTime(bot);
+  A.smoothLook(bot);
   S.setupMovements(bot);
   S.airGuard(bot);
   S.magmaGuard(bot);

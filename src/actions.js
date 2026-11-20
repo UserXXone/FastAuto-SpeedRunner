@@ -27,6 +27,29 @@ function withHand(bot, fn) {
 // Büyülü alet eldeyken (ör. sandıktan çıkan altın kazma) mineflayer'ın kazma
 // süresi hesabı 1.21'de hata veriyor ve hiçbir blok kazılamıyor. Hata olursa
 // büyüyü yok sayarak hesapla (biraz fazla bekleriz, o kadar).
+// İzleyen için yumuşak bakış: kafa anında 180° dönmesin, tick başına en fazla ~40° dönsün
+// (180° ≈ 0.25 sn). YUMUSAK_BAKIS=0 kapatır. Küçük düzeltmeler (<40°) yine anında.
+function smoothLook(bot) {
+  if (bot._smoothLook || process.env.YUMUSAK_BAKIS === "0") return;
+  bot._smoothLook = true;
+  const look = bot.look.bind(bot);
+  const STEP = (Number(process.env.BAKIS_ADIM) || 40) * Math.PI / 180;
+  const wrap = (a) => { while (a > Math.PI) a -= 2 * Math.PI; while (a < -Math.PI) a += 2 * Math.PI; return a; };
+  let gen = 0;
+  bot.look = async (yaw, pitch, force) => {
+    const my = ++gen;
+    for (let i = 0; i < 12; i++) {
+      const dy = wrap(yaw - bot.entity.yaw), dp = pitch - bot.entity.pitch;
+      if (Math.abs(dy) <= STEP && Math.abs(dp) <= STEP) break;
+      const k = STEP / Math.max(Math.abs(dy), Math.abs(dp));
+      await look(bot.entity.yaw + dy * k, bot.entity.pitch + dp * k, true);
+      await sleep(50);
+      if (my !== gen) return; // daha yeni bir bakış isteği geldi
+    }
+    return look(yaw, pitch, force);
+  };
+}
+
 function safeDigTime(bot) {
   if (bot._safeDigTime) return;
   bot._safeDigTime = true;
@@ -602,6 +625,7 @@ module.exports = {
   dbg,
   withHand,
   safeDigTime,
+  smoothLook,
   ensurePickaxe,
   pickUpTable,
   approach,

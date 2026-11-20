@@ -361,6 +361,7 @@ async function run(bot, opts = {}) {
   };
 
   A.safeDigTime(bot);
+  A.smoothLook(bot);
   setupMovements(bot);
   airGuard(bot);
 
