@@ -334,6 +334,7 @@ async function highway(bot, dest, opts = {}) {
   const enclosed = Boolean(opts.enclosed);
   let fails = 0;
   let steps = 0;
+  let harvestCounter = 0; // adım sayacı: harvestWalls çağrı sıklığını kontrol eder
   let plugged = false;
   bot.pathfinder.setGoal(null);
   for (;;) {
@@ -395,7 +396,15 @@ async function highway(bot, dest, opts = {}) {
     if (moved) {
       fails = 0;
       steps++;
-      if (opts.harvest && A.count(bot, isFiller) < opts.harvest) await harvestWalls(bot, cur, cellOf(bot));
+      // Dolgu azsa duvarlardan topla; kritik seviyede (<8) her adım, yoksa 3 adımda 1
+      if (opts.harvest && A.count(bot, isFiller) < opts.harvest) {
+        harvestCounter++;
+        const kritik = A.count(bot, isFiller) < 8;
+        if (kritik || harvestCounter >= 3) {
+          await harvestWalls(bot, cur, cellOf(bot));
+          harvestCounter = 0;
+        }
+      }
       if (opts.onStep && steps % 8 === 0) opts.onStep(cur);
     } else if (++fails > 8) {
       return "blocked";
@@ -544,7 +553,7 @@ async function longHaul(bot, dest, opts = {}) {
     const y = lvl ? lvl.y : cur.y;
     dbgH(`uzun yol: parça ${seg.x},${seg.z} y=${y} (şimdi ${cur.y}) açık hava ${lvl ? lvl.air : "?"} lav ${lvl ? lvl.lava : "?"}`);
     const r = await highway(bot, { x: seg.x, y, z: seg.z }, {
-      harvest: opts.harvest || 128,
+      harvest: opts.harvest || 32,
       range: k < 1 ? 2 : range, enclosed: true, descendEarly: true, maxMs: Math.max(1000, maxMs - (Date.now() - t0)), until: opts.until, onTick: opts.onTick,
     });
     if (r === "no-blocks") {

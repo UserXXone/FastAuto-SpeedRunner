@@ -131,11 +131,21 @@ async function equipFor(bot, block) {
   if (tool) await bot.equip(tool, "hand");
 }
 
+// Yumuşak bloklar: ucuz kazmayla kazılır, pahalı kazma harcanmaz
+const SOFT_BLOCKS = new Set(["netherrack", "crimson_nylium", "warped_nylium"]);
+const CHEAP_PICKS = new Set(["stone_pickaxe", "wooden_pickaxe"]);
+const EXPENSIVE_PICKS = new Set(["iron_pickaxe", "diamond_pickaxe", "netherite_pickaxe", "golden_pickaxe"]);
+
 // Envanterdeki en hızlı kıran aleti bul (doğru alet olmasa da; ör. taş kazmayla
 // ağlayan obsidyen). Dönen: { item, seconds }.
+// Yumuşak bloklarda ucuz kazma varsa pahalı kazmayı seçmez.
 function fastestTool(bot, block) {
   let best = { item: null, seconds: block.digTime(null, false, false, false, [], {}) / 1000 };
+  // Yumuşak blok + ucuz kazma varsa pahalı kazmayı atla
+  const soft = SOFT_BLOCKS.has(block.name);
+  const hasCheap = soft && bot.inventory.items().some((i) => CHEAP_PICKS.has(i.name));
   for (const it of bot.inventory.items()) {
+    if (hasCheap && EXPENSIVE_PICKS.has(it.name)) continue; // pahalı kazmayı koru
     const seconds = block.digTime(it.type, false, false, false, [], {}) / 1000;
     if (seconds < best.seconds - 1e-6) best = { item: it, seconds };
   }
