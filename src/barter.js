@@ -709,7 +709,8 @@ async function goOpenGround(bot, avoid = null, opts = {}) {
   }
 
   const distNow = Math.hypot(target.x - bot.entity.position.x, target.z - bot.entity.position.z);
-  if (!reached && distNow > 2) {
+  // goto bazen yerinden kıpırdamadan 'varıldı' diyor (ölçüldü): gerçek mesafeye güven.
+  if (distNow > 3) {
     A.dbg("Takas: açık zemin", "pathfinder gidemedi, longHaul ile gidiliyor", `hedef=${target.x},${target.z}`);
     try {
       const res = await H.longHaul(bot, { x: target.x, z: target.z }, { maxMs: 60000, range: 2 });
@@ -721,7 +722,7 @@ async function goOpenGround(bot, avoid = null, opts = {}) {
     A.dbg("Takas: açık zemin", "pathfinder ile varıldı", H.cellOf(bot).toString());
   }
 
-  return bot.entity.position.clone();
+  return target; // bir sonraki aramada bu noktadan uzak dur (bot varamadıysa aynı yeri seçmesin)
 }
 
 async function approachWaitTradePiglin(bot, piglin) {
