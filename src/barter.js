@@ -713,7 +713,8 @@ async function goOpenGround(bot, avoid = null, opts = {}) {
   if (distNow > 3) {
     A.dbg("Takas: açık zemin", "pathfinder gidemedi, longHaul ile gidiliyor", `hedef=${target.x},${target.z}`);
     try {
-      const res = await H.longHaul(bot, { x: target.x, z: target.z }, { maxMs: 60000, range: 2 });
+      // longHaul yüksekliği yok sayıp hedefin altında (toprakta) kalıyordu: hedef kotuyla highway.
+      const res = await H.highway(bot, { x: target.x, y: target.y, z: target.z }, { maxMs: 60000, range: 1 });
       A.dbg("Takas: açık zemin", "longHaul sonucu", res, H.cellOf(bot).toString());
     } catch (err) {
       A.dbg("Takas: açık zemin", "longHaul hatası", err.message);
@@ -798,7 +799,13 @@ async function barter(bot, needPearls, say = () => {}, opts = {}) {
     const me = bot.entity.position, d = fortDist(me) || 1;
     const away = { x: Math.round(fort.x + (me.x - fort.x) / d * 80), z: Math.round(fort.z + (me.z - fort.z) / d * 80) };
     A.dbg("Takas: fortress'ten uzaklaşıyorum", `mesafe=${d.toFixed(0)}`, `hedef=${away.x},${away.z}`);
-    try { A.dbg("Takas: uzaklaşma", await H.longHaul(bot, away, { maxMs: 120000, range: 6 })); } /* pathfinder fortress duvarında takılıyordu */ catch (err) { A.dbg("Takas: fortress'ten uzaklaşma hatası", err.message); }
+    // Önce yüzeyden, kazmadan yürü (tünel botu toprağın içinde bırakıp piglinleri gizliyordu); olmazsa tünel.
+    const prevDig = bot.pathfinder?.movements?.canDig; if (bot.pathfinder?.movements) bot.pathfinder.movements.canDig = false;
+    let walked = false;
+    try { walked = await A.goto(bot, new GoalNearXZ(away.x, away.z, 8), 60000); } finally { if (bot.pathfinder?.movements && prevDig !== undefined) bot.pathfinder.movements.canDig = prevDig; }
+    const fd = fortDist(bot.entity.position);
+    A.dbg("Takas: uzaklaşma yürüyerek", walked ? "tamam" : "olmadı", `fortress mesafe=${fd.toFixed(0)}`);
+    if (fd < 56) { try { A.dbg("Takas: uzaklaşma tünel", await H.longHaul(bot, away, { maxMs: 120000, range: 6 })); } /* pathfinder fortress duvarında takılıyordu */ catch (err) { A.dbg("Takas: fortress'ten uzaklaşma hatası", err.message); } }
   }
   // Fortress'ten uzaklaşmadan sonra (fortress yakın değilse başta) açık zemine çık
   let lastOpenGround = null;
