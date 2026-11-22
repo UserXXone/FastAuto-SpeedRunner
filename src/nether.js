@@ -24,6 +24,7 @@ const { Vec3 } = require("vec3");
 const { scanLoaded } = require("./scanner");
 const { makePlan } = require("./planner");
 const { Timer, fmt } = require("./timer");
+const Kazma = require("./kazmaOlcer");
 
 const LOGS_NEEDED = 12; // aletler, 9 kazmanın çubukları, fırın yakıtı, yedek
 const COBBLE_NEEDED = 32; // kazma 3 + kılıç 2 + 8 yedek kazma 24 + yedek
@@ -382,6 +383,7 @@ async function run(bot, info, opts = {}) {
     if (opts.chat) bot.chat(msg);
   };
   A.safeDigTime(bot);
+  Kazma.start(bot, () => timer.current || "?");
   A.smoothLook(bot);
   S.setupMovements(bot);
   S.airGuard(bot);
@@ -445,6 +447,7 @@ async function run(bot, info, opts = {}) {
   } finally {
     guard.stop();
     say(`Dövüş: ${guard.stats.hits} vuruş, ${guard.stats.eaten} yemek | can ${Math.round(bot.health)}/20, açlık ${bot.food}/20`);
+    say(Kazma.report());
   }
   console.log("\n" + timer.table());
   return timer;

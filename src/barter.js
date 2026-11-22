@@ -450,7 +450,11 @@ async function mineGold(bot, wantNuggets, say = () => {}, opts = {}) {
       continue;
     }
     const b = bot.blockAt(ore); if (!b || b.name !== "nether_gold_ore") continue;
-    try { await A.withHand(bot, async () => { const {item}=A.fastestTool(bot,b); if(item) await bot.equip(item,"hand"); await bot.dig(b,true); }); } catch (_) { continue; }
+    try {
+      const prev = bot._digTag; bot._digTag = "altın";
+      try { await A.withHand(bot, async () => { const {item}=A.fastestTool(bot,b); if(item) await bot.equip(item,"hand"); await bot.dig(b,true); }); }
+      finally { bot._digTag = prev; }
+    } catch (_) { continue; }
     await A.sleep(500); await A.collectDrops(bot, bot.entity.position, 4);
     A.dbg("altın: cevher", ore.toString(), "bot", H.cellOf(bot).toString(), "highway=kazıldı", "nugget", A.count(bot, "gold_nugget"));
     // Altın zırh yoksa piglinler saldırıyor (kazarken öldük): 36 parçacık olunca hemen altın bot.

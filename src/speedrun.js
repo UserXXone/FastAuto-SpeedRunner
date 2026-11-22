@@ -11,6 +11,7 @@ const A = require("./actions");
 const { scanLoaded } = require("./scanner");
 const { makePlan } = require("./planner");
 const { Timer, fmt } = require("./timer");
+const Kazma = require("./kazmaOlcer");
 
 const LOGS_NEEDED = 6; // 24 tahta: 2-3 masa, tahta kazma, çubuklar, 3 yakıt
 const COBBLE_NEEDED = 11; // taş kazma (3) + fırın (8)
@@ -361,6 +362,7 @@ async function run(bot, opts = {}) {
   };
 
   A.safeDigTime(bot);
+  Kazma.start(bot, () => timer.current || "?");
   A.smoothLook(bot);
   setupMovements(bot);
   airGuard(bot);
@@ -451,6 +453,7 @@ async function run(bot, opts = {}) {
 
   say(`💎 Elmas bulundu! Süre: ${fmt(timer.elapsed())}`);
   console.log("\n" + timer.table());
+  console.log(Kazma.report());
   return timer;
 }
 

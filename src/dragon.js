@@ -401,6 +401,7 @@ async function killDragon(bot, say = () => {}, opts = {}) {
   bot.on("bossBarUpdated", onBar);
   bot.on("bossBarCreated", onBar);
   bot.on("entityDead", onDead);
+  const oldDigTag = bot._digTag; bot._digTag = "ejderha";
   try {
     // Kristaller ejderhayı iyileştiriyor (yataklar 200→140 indirdi, uçarken 200'e döndü):
     // tünele girmeden giriş platformundan okla vur.
@@ -646,6 +647,7 @@ async function killDragon(bot, say = () => {}, opts = {}) {
       }
     }
   } finally {
+    bot._digTag = oldDigTag;
     bot._noFill = null;
     bot.removeListener("entityDead", onDead);
     bot.removeListener("entityHurt", onHurt);
@@ -715,6 +717,7 @@ async function killDragonBowl(bot, say = () => {}, opts = {}) {
     eating = true;
     try { say(`  altın elma (can ${bot.health.toFixed(0)})`); await C.eat(bot, { golden: true }); } catch (_) {} finally { eating = false; }
   }, 250);
+  const oldDigTag = bot._digTag; bot._digTag = "ejderha";
   try {
     // Kristaller (testte kaldırılmış olabilir): platformdan görünenleri vur.
     if (bow(bot) && arrows(bot)) {
@@ -871,6 +874,7 @@ async function killDragonBowl(bot, say = () => {}, opts = {}) {
       await A.sleep(150);
     }
   } finally {
+    bot._digTag = oldDigTag;
     clearInterval(appleTimer);
     bot.removeListener("entityHurt", onHurtB);
     bot.removeListener("entityDead", onDead);

@@ -30,6 +30,11 @@ const isLava = (b) => Boolean(b && b.name === "lava");
 // Su da kapatılır: tünel su dolarsa bot boğuluyor (yeraltı gölleri).
 const isLiquid = (b) => Boolean(b && (b.name === "lava" || b.name === "water" || b.name === "bubble_column"));
 const isOpen = (b) => Boolean(b && b.boundingBox === "empty" && !isLiquid(b) && b.name !== "fire" && b.name !== "soul_fire");
+async function tunnelDig(bot, fn) {
+  const prev = bot._digTag;
+  bot._digTag = "tünel";
+  try { return await fn(); } finally { bot._digTag = prev; }
+}
 
 // Yürümeden, olduğun yerden bir hücreye dolgu bloğu koy. Komşu sağlam blok
 // yoksa önce altındaki hücreyi doldurmayı dener.
@@ -91,7 +96,7 @@ async function harvestWalls(bot, from, at) {
         await A.withHand(bot, async () => {
           const { item } = A.fastestTool(bot, b);
           if (item && (!bot.heldItem || bot.heldItem.type !== item.type)) await bot.equip(item, "hand");
-          await bot.dig(b, true);
+          await tunnelDig(bot, () => bot.dig(b, true));
         });
       } catch (err) { /* olmadı */ }
     }
@@ -164,7 +169,7 @@ async function clearCell(bot, cell, corridor) {
       continue;
     }
     if (b.name === "fire" || b.name === "soul_fire") {
-      try { await bot.dig(b, true); } catch (err) { /* söndürülemedi */ }
+      try { await tunnelDig(bot, () => bot.dig(b, true)); } catch (err) { /* söndürülemedi */ }
       continue;
     }
     if (isOpen(b)) {
@@ -180,7 +185,7 @@ async function clearCell(bot, cell, corridor) {
       await A.withHand(bot, async () => {
         const { item } = A.fastestTool(bot, b);
         if (item && (!bot.heldItem || bot.heldItem.type !== item.type)) await bot.equip(item, "hand");
-        await bot.dig(b, true);
+        await tunnelDig(bot, () => bot.dig(b, true));
       });
     } catch (err) {
       A.dbg("otoyol: kazılamadı", b.name, cell.toString(), err.message);
@@ -506,7 +511,7 @@ async function mineTunnel(bot, want, maxSteps = 90, toward = null) {
           const b = bot.blockAt(p);
           const { item } = A.fastestTool(bot, b);
           if (item && (!bot.heldItem || bot.heldItem.type !== item.type)) await bot.equip(item, "hand");
-          await bot.dig(b, true);
+          await tunnelDig(bot, () => bot.dig(b, true));
         });
       } catch (err) {
         A.dbg("tünel: kazılamadı", err.message);

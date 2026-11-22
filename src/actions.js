@@ -622,9 +622,9 @@ async function smelt(bot, inputName, amount, fuelTest, fuelAmount) {
 }
 
 module.exports = {
-  dbg,
   withHand,
   safeDigTime,
+  dbg,
   smoothLook,
   ensurePickaxe,
   pickUpTable,
