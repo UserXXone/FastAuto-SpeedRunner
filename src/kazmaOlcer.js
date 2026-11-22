@@ -49,11 +49,18 @@ function start(bot, getStage = () => "?") {
   if (timer.unref) timer.unref();
 }
 
+// Raporda kova adı: son tamamlanan split '<ad> sonrası', split öncesi 'başlangıç'.
+function stageLabel(stage) {
+  if (!stage || stage === "?") return "başlangıç";
+  return `${stage} sonrası`;
+}
+
 function report() {
   const lines = [`Kazma: ${total} blok, el ${hand}, kırılan kazma ${breaks}`];
   for (const [stage, s] of stages) {
+    const label = stageLabel(stage);
     const tools = [...s.tools].map(([name, n]) => `${name}:${n}`).join(",") || "-";
-    lines.push(`  ${stage}: ${s.blocks} blok, el ${s.hand}, alet ${tools}`);
+    lines.push(`  ${label}: ${s.blocks} blok, el ${s.hand}, alet ${tools}`);
   }
   return lines.join("\n");
 }

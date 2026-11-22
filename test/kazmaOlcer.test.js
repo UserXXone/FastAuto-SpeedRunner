@@ -11,5 +11,13 @@ test("kazma ölçer başarılı kazıları alet ve aşamaya göre sayar", async 
   await bot.dig({ name: "stone" });
   bot.heldItem = null;
   await bot.dig({ name: "dirt" });
-  assert.match(report(), /test aşaması: 2 blok, el 1, alet iron_pickaxe:1,el:1/);
+  assert.match(report(), /test aşaması sonrası: 2 blok, el 1, alet iron_pickaxe:1,el:1/);
+});
+
+test("kazma ölçer '?' kovasını başlangıç olarak gösterir", async () => {
+  const bot = new EventEmitter();
+  bot.dig = async (block) => block;
+  start(bot, () => "?");
+  await bot.dig({ name: "netherrack" });
+  assert.match(report(), /başlangıç: 1 blok, el 1, alet el:1/);
 });

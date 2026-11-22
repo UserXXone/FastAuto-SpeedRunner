@@ -619,6 +619,111 @@ function waitTradePiglins(bot, thrown, failed, attempts) {
     .sort((a, b) => a.position.distanceTo(me) - b.position.distanceTo(me));
 }
 
+// 5x5 katı zemin ve üzerinde en az 3 blok hava kontrolü
+function isOpenGroundSpot(bot, cx, groundY, cz) {
+  for (let dx = -2; dx <= 2; dx++) {
+    for (let dz = -2; dz <= 2; dz++) {
+      const floor = bot.blockAt(new Vec3(cx + dx, groundY, cz + dz));
+      if (!floor || floor.boundingBox !== "block" || floor.name === "lava" || floor.name === "fire" || floor.name === "soul_fire") {
+        return false;
+      }
+      for (let dy = 1; dy <= 3; dy++) {
+        const air = bot.blockAt(new Vec3(cx + dx, groundY + dy, cz + dz));
+        if (!blockIsOpen(air)) return false;
+      }
+    }
+  }
+  return true;
+}
+
+// Verilen yarıçapta 5x5 açık zemin ara (avoid varsa en az 16 blok uzakta)
+function findOpenGroundSpot(bot, radius, avoid = null, opts = {}) {
+  const cur = H.cellOf(bot);
+  const avoidPos = avoid ? (Array.isArray(avoid) ? { x: avoid[0], z: avoid[1] } : (avoid.position || avoid)) : null;
+  const fort = opts.fortress && { x: opts.fortress[0], z: opts.fortress[1] };
+  const me = bot.entity.position;
+  const candidates = [];
+
+  // Önce botun zemin kotunu (cur.y - 1), gerekirse cur.y kotunu kontrol et
+  // Tünelde yeraltında kalınca aynı kotta açık alan yok: 16 blok yukarıya kadar da ara.
+  const yLevels = [cur.y - 1, cur.y, cur.y - 2]; for (let k = 2; k <= 16; k += 2) yLevels.push(cur.y - 1 + k);
+  const step = radius > 24 ? 2 : 1; // geniş aramada her ikinci sütun (hız)
+  for (const groundY of yLevels) {
+    for (let dx = -radius; dx <= radius; dx += step) {
+      for (let dz = -radius; dz <= radius; dz += step) {
+        if (Math.hypot(dx, dz) > radius) continue;
+        const cx = cur.x + dx;
+        const cz = cur.z + dz;
+        const standPos = new Vec3(cx, groundY + 1, cz);
+
+        if (avoidPos && Math.hypot(cx - avoidPos.x, cz - avoidPos.z) < 16) continue;
+        if (fort && Math.hypot(cx - fort.x, cz - fort.z) < 48) continue;
+        if (fortressNear(bot, standPos, 2)) continue;
+
+        if (isOpenGroundSpot(bot, cx, groundY, cz)) {
+          candidates.push({ pos: standPos, dist: standPos.distanceTo(me) });
+        }
+      }
+    }
+    if (candidates.length > 0) break;
+  }
+
+  if (!candidates.length) return null;
+  candidates.sort((a, b) => a.dist - b.dist);
+  return candidates[0].pos;
+}
+
+// Açık zemine çık: 24 blokta (bulamazsa 40) 5x5 katı zemin ara, kazmadan git, olmazsa longHaul
+async function goOpenGround(bot, avoid = null, opts = {}) {
+  let target = findOpenGroundSpot(bot, 24, avoid, opts);
+  if (!target) {
+    A.dbg("Takas: açık zemin", "24 blokta bulunamadı, yarıçap 40'a çıkarılıyor");
+    target = findOpenGroundSpot(bot, 40, avoid, opts);
+  }
+  if (!target) {
+    A.dbg("Takas: açık zemin", "40 blokta da uygun açık zemin bulunamadı", H.cellOf(bot).toString());
+    return null;
+  }
+
+  const d0 = target.distanceTo(bot.entity.position);
+  A.dbg("Takas: açık zemin", `hedef=${target.x},${target.y},${target.z}`, `mesafe=${d0.toFixed(1)}`, `bot=${H.cellOf(bot).toString()}`);
+
+  if (d0 <= 2) {
+    A.dbg("Takas: açık zemin", "zaten açık zeminde", target.toString());
+    return target;
+  }
+
+  // Oraya önce pathfinder ile KAZMADAN git
+  let reached = false;
+  const prevCanDig = bot.pathfinder?.movements ? bot.pathfinder.movements.canDig : undefined;
+  if (bot.pathfinder?.movements) bot.pathfinder.movements.canDig = false;
+  try {
+    A.dbg("Takas: açık zemin", "pathfinder ile kazmadan gidiliyor", `hedef=${target.x},${target.y},${target.z}`);
+    reached = await A.goto(bot, new GoalNear(target.x, target.y, target.z, 2), 15000);
+  } catch (err) {
+    A.dbg("Takas: açık zemin", "pathfinder hatası", err.message);
+  } finally {
+    if (bot.pathfinder?.movements && prevCanDig !== undefined) {
+      bot.pathfinder.movements.canDig = prevCanDig;
+    }
+  }
+
+  const distNow = Math.hypot(target.x - bot.entity.position.x, target.z - bot.entity.position.z);
+  if (!reached && distNow > 2) {
+    A.dbg("Takas: açık zemin", "pathfinder gidemedi, longHaul ile gidiliyor", `hedef=${target.x},${target.z}`);
+    try {
+      const res = await H.longHaul(bot, { x: target.x, z: target.z }, { maxMs: 60000, range: 2 });
+      A.dbg("Takas: açık zemin", "longHaul sonucu", res, H.cellOf(bot).toString());
+    } catch (err) {
+      A.dbg("Takas: açık zemin", "longHaul hatası", err.message);
+    }
+  } else {
+    A.dbg("Takas: açık zemin", "pathfinder ile varıldı", H.cellOf(bot).toString());
+  }
+
+  return bot.entity.position.clone();
+}
+
 async function approachWaitTradePiglin(bot, piglin) {
   const p = bot.entities[piglin.id] || piglin;
   if (!p?.position) return false;
@@ -627,8 +732,18 @@ async function approachWaitTradePiglin(bot, piglin) {
   const d = Math.hypot(dx, dz) || 1, len = Math.min(16, d);
   const dest = { x: me.x + dx / d * len, z: me.z + dz / d * len };
   A.dbg("Takas: bekle kısa yaklaşım", `piglin=${p.id}`, `mesafe=${d.toFixed(1)}`);
-  try { await A.goto(bot, new GoalNearXZ(Math.round(dest.x), Math.round(dest.z), 3), 15000); }
-  catch (err) { A.dbg("Takas: bekle kısa yaklaşım hatası", err.message); return false; }
+  const prevCanDig = bot.pathfinder?.movements ? bot.pathfinder.movements.canDig : undefined;
+  if (bot.pathfinder?.movements) bot.pathfinder.movements.canDig = false;
+  try {
+    await A.goto(bot, new GoalNearXZ(Math.round(dest.x), Math.round(dest.z), 3), 15000);
+  } catch (err) {
+    A.dbg("Takas: bekle kısa yaklaşım hatası", err.message);
+    return false;
+  } finally {
+    if (bot.pathfinder?.movements && prevCanDig !== undefined) {
+      bot.pathfinder.movements.canDig = prevCanDig;
+    }
+  }
   return true;
 }
 
@@ -684,10 +799,16 @@ async function barter(bot, needPearls, say = () => {}, opts = {}) {
     A.dbg("Takas: fortress'ten uzaklaşıyorum", `mesafe=${d.toFixed(0)}`, `hedef=${away.x},${away.z}`);
     try { A.dbg("Takas: uzaklaşma", await H.longHaul(bot, away, { maxMs: 120000, range: 6 })); } /* pathfinder fortress duvarında takılıyordu */ catch (err) { A.dbg("Takas: fortress'ten uzaklaşma hatası", err.message); }
   }
+  // Fortress'ten uzaklaşmadan sonra (fortress yakın değilse başta) açık zemine çık
+  let lastOpenGround = null;
+  if (waitMode) {
+    lastOpenGround = await goOpenGround(bot, null, { fortress: opts.fortress });
+    if (!lastOpenGround) lastOpenGround = bot.entity.position.clone();
+  }
   const deadline=t0+maxMs, start=A.count(bot,"gold_ingot");
   const attempts=[], failed=new Set(), thrown=new Map();
-  let waitFallbackUsed=false;
   let lastPiglin=Date.now(), last=Date.now(), lastAccepted=0;
+  let lastVisibleTry=0;
   const hasNearbyPearl=()=>drops(bot,"ender_pearl")
     .filter(e=>e.position.distanceTo(bot.entity.position)<=6)
     .some(e=>drops(bot,"gold_ingot").every(g=>e.position.distanceTo(g.position)>=1.5));
@@ -726,15 +847,22 @@ async function barter(bot, needPearls, say = () => {}, opts = {}) {
       !failed.has(p.id) && !attempts.some(a=>a.piglin===p.id));
     if (candidates.length) lastPiglin=Date.now();
     if (!candidates.length) {
-      if (waitMode && Date.now()-lastPiglin>=15000) {
-        const visible = visibleTradePiglins(bot).filter(p => !isBabyPiglin(p) && p.position && fortDist(p.position) >= 48 && flatDistance(p.position, bot.entity.position) <= 32 && Math.abs(p.position.y - bot.entity.position.y) <= 6) // 80 bloktaki piglin için dağı kazıp kazmaları bitiriyordu
-          .sort((a,b) => a.position.distanceTo(bot.entity.position)-b.position.distanceTo(bot.entity.position));
-        if (visible.length) await approachWaitTradePiglin(bot, visible[0]);
-        else if (!waitFallbackUsed) {
-          waitFallbackUsed=true;
-          await reachPiglins(bot, null, Math.min(60000, Math.max(1000, deadline-Date.now())));
+      if (waitMode) {
+        // 90 sn uygun piglin yoksa açık zemine tekrar git (önceki noktadan en az 16 blok uzakta)
+        if (Date.now()-lastPiglin>=90000) {
+          A.dbg("Takas: açık zemin", "90 sn uygun piglin yok, yeni açık zemine gidiliyor", H.cellOf(bot).toString());
+          const spot = await goOpenGround(bot, lastOpenGround, { fortress: opts.fortress });
+          lastOpenGround = spot || bot.entity.position.clone();
+          lastPiglin = Date.now();
+          continue;
         }
-        lastPiglin=Date.now();
+        if (Date.now()-lastVisibleTry>=15000) {
+          lastVisibleTry=Date.now();
+          const visible = visibleTradePiglins(bot).filter(p => !isBabyPiglin(p) && p.position && fortDist(p.position) >= 48 && flatDistance(p.position, bot.entity.position) <= 32 && Math.abs(p.position.y - bot.entity.position.y) <= 6) // 80 bloktaki piglin için dağı kazıp kazmaları bitiriyordu
+            .sort((a,b) => a.position.distanceTo(bot.entity.position)-b.position.distanceTo(bot.entity.position));
+          if (visible.length) await approachWaitTradePiglin(bot, visible[0]);
+        }
+        await A.sleep(250);
         continue;
       }
       if (!waitMode && Date.now()-lastPiglin>=15000) {
@@ -790,4 +918,4 @@ async function barter(bot, needPearls, say = () => {}, opts = {}) {
   return {pearls:E.pearls(bot),ingotsUsed:start-A.count(bot,"gold_ingot"),ms:Date.now()-t0};
 }
 
-module.exports={mineGold,barter,neededEyes,ingotsFromNuggets};
+module.exports={mineGold,barter,goOpenGround,neededEyes,ingotsFromNuggets};
