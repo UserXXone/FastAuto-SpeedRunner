@@ -701,6 +701,9 @@ async function killDragonBowl(bot, say = () => {}, opts = {}) {
   let bombs = 0;
   const onDead = (e) => { if (e.name === "ender_dragon") killed = true; };
   const onBar = (b) => { if (b && typeof b.health === "number") bot._dragonHp = b.health; };
+  // Ejderha hasarını işaretle (nefes kaçışı için; eski yöntemde vardı, burada dinlenmiyordu).
+  const onHurtB = (who, src) => { if (who === bot.entity && src && src.name === "ender_dragon") bot._dragonHurtAt = Date.now(); };
+  bot.on("entityHurt", onHurtB);
   bot.on("entityDead", onDead);
   bot.on("bossBarUpdated", onBar);
   bot.on("bossBarCreated", onBar);
@@ -771,9 +774,59 @@ async function killDragonBowl(bot, say = () => {}, opts = {}) {
     bot._noFill = [H.cellOf(bot), H.cellOf(bot).offset(0, 1, 0)];
     await H.placeMany(bot, [entry, entry.offset(0, 1, 0)], 3);
     bot._noFill = null;
+    const bowlSpot = H.cellOf(bot).clone();
     say(`Çanaktayım ${H.cellOf(bot)}, fıskiye tepesi ${top}`);
     let lastLog = 0;
     let lastDodge = 0;
+    const cloudRadius = (e) => {
+      const m = e && e.metadata && e.metadata[8];
+      const r = Number(e && (e.radius ?? (m && typeof m === "object" ? m.value : m)));
+      return Number.isFinite(r) && r > 0 ? r : 3;
+    };
+    const clouds = () => Object.values(bot.entities).filter((e) => e.name === "area_effect_cloud");
+    const covers = (e, p) => Math.hypot(e.position.x - p.x, e.position.z - p.z) < cloudRadius(e) + 1.5 && Math.abs(e.position.y - p.y) < 3;
+    const cloudAtBowl = () => clouds().some((e) => covers(e, bowlSpot));
+    const standable = (c) => {
+      const floor = bot.blockAt(c.offset(0, -1, 0));
+      const feet = bot.blockAt(c), head = bot.blockAt(c.offset(0, 1, 0));
+      return floor && floor.boundingBox === "block" && floor.name !== "magma_block" &&
+        feet && feet.boundingBox !== "block" && head && head.boundingBox !== "block";
+    };
+    const escapeBreath = async (cloud) => {
+      const started = Date.now();
+      const cp = cloud ? cloud.position : bowlSpot;
+      let dx = bot.entity.position.x - cp.x, dz = bot.entity.position.z - cp.z;
+      if (Math.hypot(dx, dz) < 1) { dx = bot.entity.position.x - bowlSpot.x; dz = bot.entity.position.z - bowlSpot.z; }
+      if (Math.hypot(dx, dz) < 1) { dx = 1; dz = 0; }
+      const n = Math.hypot(dx, dz);
+      const candidates = [];
+      for (const r of [5, 6, 7]) for (let i = 0; i < 16; i++) {
+        const a = Math.atan2(dz, dx) + (i - 8) * Math.PI / 8;
+        const x = Math.round(cp.x + Math.cos(a) * r), z = Math.round(cp.z + Math.sin(a) * r);
+        if (Math.hypot(x, z) > 48) continue; // adanın dışı: void
+        const gy = groundAt(bot, x, z, Math.ceil(bot.entity.position.y) + 4);
+        if (gy == null) continue;
+        const c = new Vec3(x, gy + 1, z);
+        if (Math.abs(c.y - bowlSpot.y) > 5 || !standable(c) || clouds().some((e) => covers(e, c))) continue;
+        candidates.push({ c, score: Math.abs(r - 6) + Math.abs(i - 8) * 0.03 });
+      }
+      candidates.sort((a, b) => a.score - b.score);
+      const target = candidates[0] && candidates[0].c;
+      A.dbg("nefes: kaçıyorum", target ? target.toString() : "yol yok");
+      say("  Nefes geldi, kısa kaçıyorum");
+      const movements = bot.pathfinder && bot.pathfinder.movements;
+      const old = movements && { canDig: movements.canDig, allow1by1towers: movements.allow1by1towers, allowParkour: movements.allowParkour };
+      try {
+        if (movements) { movements.canDig = false; movements.allow1by1towers = false; movements.allowParkour = false; }
+        if (target) await A.goto(bot, new GoalNear(target.x, target.y, target.z, 0), 4000);
+      } finally {
+        if (movements && old) Object.assign(movements, old);
+      }
+      // Kaçış + bekleme + dönüş toplamı yaklaşık 15 saniyeyi geçmesin.
+      while (Date.now() - started < 10500 && cloudAtBowl() && !killed) await A.sleep(200);
+      const left = Math.max(700, 14500 - (Date.now() - started));
+      await A.goto(bot, new GoalNear(bowlSpot.x, bowlSpot.y, bowlSpot.z, 0), Math.min(3500, left));
+    };
     while (!killed) {
       if (Date.now() - t0 > maxMs) throw new Error(`Ejderha çok uzun sürdü (${bombs} yatak)`);
       if (!beds(bot)) throw new Error(`Yatak bitti (${bombs} patlatıldı)`);
@@ -783,19 +836,13 @@ async function killDragonBowl(bot, say = () => {}, opts = {}) {
         lastLog = Date.now();
         A.dbg(`ejderha can ${hpTxt()}/200 | ${d ? d.position.floored().toString() : "yok"} | ben ${H.cellOf(bot)} can ${bot.health.toFixed(0)} yatak ${beds(bot)} patlama ${bombs}`);
       }
-      // Bulut üstümüzde: çanağın öbür yanına geç.
-      const cloud = Object.values(bot.entities).find((e) => e.name === "area_effect_cloud" && Math.hypot(e.position.x - pos.x, e.position.z - pos.z) < 3.8 && Math.abs(e.position.y - pos.y) < 2);
-      if (cloud && Date.now() - lastDodge > 1500) {
+      // Bulut yarıçapına göre kaç; hasar da bulut kaybolurken tetikleyebilir.
+      const cloud = clouds().find((e) => covers(e, pos));
+      const hurtRecently = Date.now() - (bot._dragonHurtAt || 0) < 1500;
+      const hurtOutsidePerch = hurtRecently && !(d && perched(bot, top));
+      if ((cloud || hurtOutsidePerch) && Date.now() - lastDodge > 1500) {
         lastDodge = Date.now();
-        // Bulutun karşı tarafı (sütunun öbür yanı).
-        const cx = cloud.position.x, cz = cloud.position.z;
-        cur = Math.abs(cx) >= Math.abs(cz) ? [cx > 0 ? -1 : 1, 0] : [0, cz > 0 ? -1 : 1];
-        A.dbg("bulut: çanağın öbür yanına", cur.join(","));
-        // Sütunun etrafından: önce çapraz köşe, sonra karşı taraf.
-        const here = H.cellOf(bot);
-        const mid = cur[0] !== 0 ? [Math.sign(here.x || 1), 2 * (here.z >= 0 ? 1 : -1)] : [2 * (here.x >= 0 ? 1 : -1), Math.sign(here.z || 1)];
-        await walkTo(cur[0] !== 0 ? 0 : mid[0], cur[0] !== 0 ? mid[1] : 0, 1500);
-        await walkTo(cur[0] * 2, cur[1] * 2, 2000);
+        await escapeBreath(cloud || clouds().sort((a, b) => a.position.distanceTo(pos) - b.position.distanceTo(pos))[0]);
         continue;
       }
       if (d && perched(bot, top)) {
@@ -825,6 +872,7 @@ async function killDragonBowl(bot, say = () => {}, opts = {}) {
     }
   } finally {
     clearInterval(appleTimer);
+    bot.removeListener("entityHurt", onHurtB);
     bot.removeListener("entityDead", onDead);
   }
   return { killed, bombs, ms: Date.now() - t0 };
